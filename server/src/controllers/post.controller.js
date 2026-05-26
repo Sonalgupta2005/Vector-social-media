@@ -14,15 +14,23 @@ export const removePostById = async (postId) => {
         return null;
     }
 
+    const session = await mongoose.startSession();
+    try {
+        await session.withTransaction(async () => {
+            await Comment.deleteMany({ post: postId }, { session });
+            await Notification.deleteMany({ post: postId }, { session });
+            await Report.deleteMany({ targetType: "post", targetId: postId }, { session });
+            await User.updateMany({ bookmarks: postId }, { $pull: { bookmarks: postId } }, { session });
+            await post.deleteOne({ session });
+        });
+    } finally {
+        await session.endSession();
+    }
+
     if (post.imagePublicId) {
         await cloudinary.uploader.destroy(post.imagePublicId);
     }
 
-    await Comment.deleteMany({ post: postId });
-    await Notification.deleteMany({ post: postId });
-    await Report.deleteMany({ targetType: "post", targetId: postId });
-    await User.updateMany({ bookmarks: postId },{ $pull: { bookmarks: postId } });
-    await post.deleteOne();
     return post;
 };
 
