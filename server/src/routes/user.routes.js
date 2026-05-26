@@ -1,8 +1,6 @@
 import express from "express";
-import jwt from "jsonwebtoken";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import upload from "../middlewares/upload.middleware.js";
-import User from "../models/user.model.js";
 import { getAllUsers, getFollowers, getFollowing, getUserProfile, searchUsers, toggleFollowUser, updateProfile, uploadAvatar, getSuggestedUsers, getFollowRequests, acceptFollowRequest, rejectFollowRequest, getSentFollowRequests, blockUser, unblockUser } from "../controllers/user.controller.js";
 import optionalAuth from "../middlewares/optionalAuth.middleware.js";
 

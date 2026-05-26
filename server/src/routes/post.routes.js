@@ -15,8 +15,6 @@ import {
 } from "../controllers/post.controller.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import upload from "../middlewares/upload.middleware.js";
-import jwt from "jsonwebtoken";
-import User from "../models/user.model.js";
 import optionalAuth from "../middlewares/optionalAuth.middleware.js";
 
 const postRouter = express.Router();

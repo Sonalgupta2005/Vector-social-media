@@ -1,8 +1,6 @@
 import express from "express";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import { addComment, getPostComments, deleteComment} from "../controllers/comment.controller.js";
-import jwt from "jsonwebtoken";
-import User from "../models/user.model.js";
 import optionalAuth from "../middlewares/optionalAuth.middleware.js";
 
 const commentRouter = express.Router();
