@@ -1,4 +1,5 @@
-import User from "../models/user.model.js"
+import User from "../models/user.model.js";
+import Follow from "../models/follow.model.js";
 import { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } from "../validators/user.validator.js";
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -136,7 +137,7 @@ export const register = async (req, res) => {
     }
 };
 
-export const getMe = (req, res) => {
+export const getMe = async (req, res) => {
     try {
         if (!req.user) {
             return res.status(401).json({
@@ -145,6 +146,11 @@ export const getMe = (req, res) => {
             });
         }
         const user = req.user;
+
+        const followings = await Follow.find({ follower: user._id, status: "accepted" }).select("following").lean();
+        const followers = await Follow.find({ following: user._id, status: "accepted" }).select("follower").lean();
+        const followRequests = await Follow.find({ following: user._id, status: "pending" }).select("follower").lean();
+
         return res.status(200).json({
             success: true,
             user: {
@@ -159,10 +165,10 @@ export const getMe = (req, res) => {
                 avatar: user.avatar,
                 isProfileComplete: user.isProfileComplete,
                 signupStep: user.signupStep,
-                followers: (user.followers || []).map(id => id.toString()),
-                following: (user.following || []).map(id => id.toString()),
+                followers: followers.map(f => f.follower.toString()),
+                following: followings.map(f => f.following.toString()),
                 isPrivate: user.isPrivate,
-                followRequests: (user.followRequests || []).map(id => id.toString()),
+                followRequests: followRequests.map(f => f.follower.toString()),
                 blockedUsers: (user.blockedUsers || []).map(id => id.toString()),
             },
         });

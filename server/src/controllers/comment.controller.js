@@ -1,6 +1,7 @@
 import Comment from "../models/comment.model.js";
 import Post from "../models/post.model.js";
 import User from "../models/user.model.js";
+import Follow from "../models/follow.model.js";
 import Notification from "../models/notification.model.js";
 import { getIO } from "../socket/socket.js";
 
@@ -27,9 +28,7 @@ export const addComment = async (req, res) => {
             }
 
             if (authorUser?.isPrivate && currentUserId !== post.author.toString()) {
-                const isFollower = authorUser.followers?.some(
-                    id => id.toString() === currentUserId
-                );
+                const isFollower = await Follow.exists({ follower: currentUserId, following: post.author, status: "accepted" });
                 if (!isFollower) {
                     return res.status(403).json({
                         message: "This post is from a private account. Follow them to comment.",
@@ -37,10 +36,10 @@ export const addComment = async (req, res) => {
                 }
             }
         }
-        // Re-verify block status right before create
+        // Re-verify block status and follow right before create
         if (req.user) {
             const [freshAuthor, freshCurrent] = await Promise.all([
-                User.findById(post.author).select("blockedUsers followers isPrivate"),
+                User.findById(post.author).select("blockedUsers isPrivate"),
                 User.findById(req.user.id).select("blockedUsers"),
             ]);
             const stillBlocked = freshCurrent?.blockedUsers?.some(id => id.toString() === post.author.toString()) ||
@@ -50,9 +49,7 @@ export const addComment = async (req, res) => {
             }
 
             if (freshAuthor?.isPrivate && req.user.id !== post.author.toString()) {
-                const isStillFollower = freshAuthor.followers?.some(
-                    id => id.toString() === req.user.id
-                );
+                const isStillFollower = await Follow.exists({ follower: req.user.id, following: post.author, status: "accepted" });
                 if (!isStillFollower) {
                     return res.status(403).json({
                         message: "This post is from a private account. Follow them to comment.",
@@ -98,7 +95,7 @@ export const getPostComments = async (req, res) => {
             return res.status(404).json({ message: "Post not found" });
         }
 
-        const postAuthor = await User.findById(post.author).select("blockedUsers followers isPrivate");
+        const postAuthor = await User.findById(post.author).select("blockedUsers isPrivate");
 
         if (req.user) {
             const currentUserId = req.user.id;
@@ -109,7 +106,7 @@ export const getPostComments = async (req, res) => {
             }
 
             if (postAuthor?.isPrivate && currentUserId !== post.author.toString()) {
-                const isFollower = postAuthor.followers?.some(id => id.toString() === currentUserId);
+                const isFollower = await Follow.exists({ follower: currentUserId, following: post.author, status: "accepted" });
                 if (!isFollower) {
                     return res.status(403).json({ message: "This post is from a private account. Follow them to see it." });
                 }
