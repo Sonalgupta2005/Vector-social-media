@@ -4,6 +4,7 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient } from "redis";
 import mongoose from "mongoose";
 import Conversation from "../models/conversation.model.js";
+import User from "../models/user.model.js";
 
 let io;
 
@@ -37,7 +38,7 @@ export const initSocket = async (server) => {
 
   io.adapter(createAdapter(pubClient, subClient));
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const cookieHeader = socket.handshake.headers.cookie;
       if (!cookieHeader) {
@@ -49,6 +50,13 @@ export const initSocket = async (server) => {
         return next(new Error("Authentication error: Token missing"));
       }
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.id);
+      if (!user) {
+        return next(new Error("Authentication error: User not found"));
+      }
+      if ((decoded.version || 0) !== (user.tokenVersion || 0)) {
+        return next(new Error("Authentication error: Token invalidated due to password reset"));
+      }
       socket.userId = decoded.id;
       next();
     } catch {
