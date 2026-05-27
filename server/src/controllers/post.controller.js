@@ -202,7 +202,11 @@ export const searchPosts = async (req, res) => {
             .sort({ _id: -1 })
             .limit(limit)
             .populate("author", "username name surname avatar")
-            .populate("likes", "username name avatar _id");
+            .populate(
+                excludeUserIds.length
+                    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
+                    : { path: "likes", select: "username name avatar _id" }
+            );
 
         const hasMore = posts.length === limit;
         const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
