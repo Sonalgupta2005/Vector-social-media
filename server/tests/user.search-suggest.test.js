@@ -2,6 +2,7 @@ import request from 'supertest';
 import app from '../src/app.js';
 import User from '../src/models/user.model.js';
 import Post from '../src/models/post.model.js';
+import Follow from '../src/models/follow.model.js';
 import jwt from 'jsonwebtoken';
 
 describe('User Search and Suggestions Endpoints', () => {
@@ -125,7 +126,7 @@ describe('User Search and Suggestions Endpoints', () => {
 
     it('should return posts from private accounts the requester follows', async () => {
       // User1 follows User2
-      await User.findByIdAndUpdate(user1._id, { $addToSet: { following: user2._id } });
+      await Follow.create({ follower: user1._id, following: user2._id, status: 'accepted' });
       // Set user2 as private
       await User.findByIdAndUpdate(user2._id, { isPrivate: true });
 
@@ -171,7 +172,7 @@ describe('User Search and Suggestions Endpoints', () => {
 
     it('should return suggested users excluding self, blocked, and already following', async () => {
       // User1 follows User2
-      await User.findByIdAndUpdate(user1._id, { $addToSet: { following: user2._id } });
+      await Follow.create({ follower: user1._id, following: user2._id, status: 'accepted' });
       // User1 blocks User3
       await User.findByIdAndUpdate(user1._id, { $addToSet: { blockedUsers: user3._id } });
 
@@ -192,7 +193,7 @@ describe('User Search and Suggestions Endpoints', () => {
 
     it('should correctly mark isRequestedByCurrentUser if follow request is pending', async () => {
       // User1 sends follow request to User2
-      await User.findByIdAndUpdate(user2._id, { $addToSet: { followRequests: user1._id } });
+      await Follow.create({ follower: user1._id, following: user2._id, status: 'pending' });
 
       const response = await request(app)
         .get('/api/users/suggestions')
