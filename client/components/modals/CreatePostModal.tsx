@@ -2,7 +2,7 @@
 
 import { X, Image as ImageIcon, Send, Trash2, HelpCircle } from "lucide-react";
 import Image from "next/image";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
 import { toast } from "react-toastify";
 import axios from "axios";
@@ -31,6 +31,16 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
 
     const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL!;
     const MAX_CHARS = 500;
+    useEffect(() => {
+    const savedDraft = localStorage.getItem("postDraft");
+
+    if (savedDraft) {
+        const parsedDraft = JSON.parse(savedDraft);
+
+        setContent(parsedDraft.content || "");
+        setIntent(parsedDraft.intent || "");
+    }
+}, []);
 
     const handleClose = () => {
         setVisible(false);
@@ -108,6 +118,7 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
                 return;
             } else {
                 toast.success("Posted!");
+                localStorage.removeItem("postDraft");
                 router.push('/main');
             }
             onPostCreated(data.post);
@@ -118,6 +129,19 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
         } finally {
             setLoading(false);
         }
+    };
+    const handleSaveDraft = () => {
+    const draft = {
+        content,
+        intent,
+    };
+
+    localStorage.setItem(
+        "postDraft",
+        JSON.stringify(draft)
+    );
+
+    toast.success("Draft saved!");
     };
 
     const intents = [
@@ -303,21 +327,32 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
                     {/* Actions Row */}
                     <div className="flex flex-col gap-3 items-center justify-between pt-4 border-t border-white/10">
                         <div className="flex items-center gap-3 w-full">
-                            <Button 
-                                variant="ghost" 
-                                onClick={handleClose} 
-                                className="rounded-xl px-6 font-semibold border w-1/2"
+                            <Button
+                                variant="ghost"
+                                onClick={handleClose}
+                                className="rounded-xl px-4 font-semibold border flex-1"
                             >
                                 Cancel
-                            </Button>
-                            <Button 
-                                disabled={loading || !intent || (!content.trim() && !imageFile)}
-                                onClick={handlePost} 
-                                className={cn(
-                                    "rounded-xl w-1/2 px-8 font-bold shadow-lg transition-all active:scale-95",
-                                    "bg-primary text-primary-foreground hover:opacity-90"
-                                )}
-                            >
+                        </Button>
+
+                        <Button
+                            variant="secondary"
+                            onClick={handleSaveDraft}
+                            disabled={!content.trim() && !imageFile}
+                            className="rounded-xl px-4 font-semibold flex-1"
+                        >
+                            Save Draft
+                        </Button>
+
+                        <Button
+                            disabled={loading || !intent || (!content.trim() && !imageFile)}
+                            onClick={handlePost}
+                            className={cn(
+                                "rounded-xl flex-1 px-6 font-bold shadow-lg transition-all active:scale-95",
+                                "bg-primary text-primary-foreground hover:opacity-90"
+                            )}
+                        >
+                            
                                 {loading ? (
                                     <div className="flex items-center gap-2">
                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
