@@ -2,59 +2,67 @@ import Notification from "../models/notification.model.js";
 import User from "../models/user.model.js";
 
 export const getNotifications = async (req, res) => {
-    const currentUserId = req.user?._id || req.user?.id;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-    const blockerIds = blockers.map(u => u._id);
-    const blockedIds = req.user?.blockedUsers || [];
-    const excludeIds = [...blockedIds, ...blockerIds];
-    const filter = { 
-        recipient: currentUserId,
-        sender: { $nin: excludeIds } 
-    };
+    try {
+        const currentUserId = req.user?._id || req.user?.id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+        const skip = (page - 1) * limit;
+        const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
+        const blockerIds = blockers.map(u => u._id);
+        const blockedIds = req.user?.blockedUsers || [];
+        const excludeIds = [...blockedIds, ...blockerIds];
+        const filter = {
+            recipient: currentUserId,
+            sender: { $nin: excludeIds }
+        };
 
-    if (req.query.countOnly === "true") {
-        const unreadCount = await Notification.countDocuments({ ...filter, isRead: false });
-        return res.json({ unreadCount });
-    }
-
-    const notifications = await Notification.find(filter)
-        .populate("sender", "name username avatar _id")
-        .populate("post")
-        .populate("conversation")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
-
-    const followingUserIds = new Set(
-        (req.user?.following || []).map(id => id.toString())
-    );
-
-    const senderIds = notifications
-        .map(n => n.sender?._id)
-        .filter(id => id);
-
-    const requestedUsers = await User.find({
-        _id: { $in: senderIds },
-        followRequests: currentUserId,
-    }).select("_id").lean();
-
-    const requestedUserIds = new Set(
-        requestedUsers.map((user) => user._id.toString())
-    );
-
-    const notificationsWithFollowState = notifications.map(notification => {
-        if (notification.sender) {
-            notification.sender.isFollowedByCurrentUser = followingUserIds.has(notification.sender._id.toString());
-            notification.sender.isRequestedByCurrentUser = requestedUserIds.has(notification.sender._id.toString());
+        if (req.query.countOnly === "true") {
+            const unreadCount = await Notification.countDocuments({ ...filter, isRead: false });
+            return res.json({ unreadCount });
         }
-        return notification;
-    });
 
-    return res.json(notificationsWithFollowState);
+        const notifications = await Notification.find(filter)
+            .populate("sender", "name username avatar _id")
+            .populate("post")
+            .populate("conversation")
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit)
+            .lean();
+
+        const followingUserIds = new Set(
+            (req.user?.following || []).map(id => id.toString())
+        );
+
+        const senderIds = notifications
+            .map(n => n.sender?._id)
+            .filter(id => id);
+
+        const requestedUsers = await User.find({
+            _id: { $in: senderIds },
+            followRequests: currentUserId,
+        }).select("_id").lean();
+
+        const requestedUserIds = new Set(
+            requestedUsers.map((user) => user._id.toString())
+        );
+
+        const notificationsWithFollowState = notifications.map(notification => {
+            if (notification.sender) {
+                notification.sender.isFollowedByCurrentUser = followingUserIds.has(notification.sender._id.toString());
+                notification.sender.isRequestedByCurrentUser = requestedUserIds.has(notification.sender._id.toString());
+            }
+            return notification;
+        });
+
+        return res.json(notificationsWithFollowState);
+    } catch (err) {
+        console.error("getNotifications error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
 };
 
 
