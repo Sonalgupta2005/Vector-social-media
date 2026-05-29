@@ -9,6 +9,10 @@ import cloudinary from "../config/cloudinary.js";
 import { getIO } from "../socket/socket.js";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
 
+// Hard upper bound on result-set size for any list endpoint in this controller.
+// Prevents callers from triggering full-collection scans with deep .populate() chains.
+const MAX_LIMIT = 50;
+
 export const removePostById = async (postId) => {
     const post = await Post.findById(postId);
     if (!post) {
@@ -95,7 +99,7 @@ export const createPost = async (req, res) => {
 export const getPosts = async (req, res) => {
     try {
         const cursor = req.query.cursor;
-        const limit = parseInt(req.query.limit) || 10;
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
         let filter = {};
         let excludeUserIds = [];
@@ -166,7 +170,7 @@ export const searchPosts = async (req, res) => {
     try {
         const q = req.query.q?.trim();
         const cursor = req.query.cursor;
-        const limit = parseInt(req.query.limit) || 10;
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
         if (!q) {
             return res.status(200).json({ posts: [], limit, hasMore: false, nextCursor: null });
@@ -606,9 +610,10 @@ export const getTopPostsOfWeek = async (req, res) => {
         const oneWeekAgo = new Date();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
         const requestedLimit = Number.parseInt(req.query.limit, 10);
-        const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
-            ? requestedLimit
-            : 10;
+        const limit = Math.min(
+            Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : 10,
+            MAX_LIMIT
+        );
         let filter = { createdAt: { $gte: oneWeekAgo } };
         let excludeUserIds = [];
 
