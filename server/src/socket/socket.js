@@ -40,7 +40,7 @@ const setupRedisAdapter = async (socketServer) => {
 export const initSocket = async (server) => {
   io = new Server(server, {
     cors: {
-      origin: ["http://localhost:3000", "http://vector-lac.vercel.app", "https://vector-lac.vercel.app", process.env.FRONTEND_URL],
+      origin: ["http://localhost:3000", "https://vector-lac.vercel.app", process.env.FRONTEND_URL].filter(Boolean),
       credentials: true,
     },
   });
