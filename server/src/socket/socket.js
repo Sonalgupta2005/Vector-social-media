@@ -37,7 +37,6 @@ const setupRedisAdapter = async (socketServer) => {
     return false;
   }
 };
-
 export const initSocket = async (server) => {
   io = new Server(server, {
     cors: {

@@ -1,4 +1,5 @@
 import cloudinary from "../config/cloudinary.js";
+import mongoose from "mongoose";
 import User from "../models/user.model.js";
 import Follow from "../models/follow.model.js";
 import Conversation from "../models/conversation.model.js";
@@ -8,8 +9,10 @@ import Post from "../models/post.model.js";
 import Comment from "../models/comment.model.js";
 import { getIO } from "../socket/socket.js";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
+import { cleanupTempUpload, IMAGE_UPLOAD_LIMITS, validateImageUpload } from "../utils/imageUploadValidation.js";
 
 export const uploadAvatar = async (req, res) => {
+    let avatarPublicId = null;
     try {
         if (!req.file) {
             return res.status(400).json({
@@ -18,20 +21,11 @@ export const uploadAvatar = async (req, res) => {
             });
         }
 
-        const allowedTypes = ["image/jpeg", "image/png", "image/webp"];
-        if (!allowedTypes.includes(req.file.mimetype)) {
-            return res.status(400).json({
-                success: false,
-                message: "Only JPEG, PNG and WEBP images are allowed",
-            });
-        }
-
-        if (req.file.size > 5 * 1024 * 1024) {
-            return res.status(400).json({
-                success: false,
-                message: "File size must be under 5MB",
-            });
-        }
+        await validateImageUpload(req.file, {
+            allowedFormats: ["jpeg", "png", "webp"],
+            maxSize: IMAGE_UPLOAD_LIMITS.avatar,
+            label: "Avatar",
+        });
 
         const user = await User.findById(req.user.id);
         if (!user) {
@@ -47,6 +41,7 @@ export const uploadAvatar = async (req, res) => {
                 { quality: "auto" },
             ],
         });
+        avatarPublicId = uploadResult.public_id;
         if (user.avatarPublicId) {
             await cloudinary.uploader.destroy(user.avatarPublicId).catch(() => {});
         }
@@ -58,7 +53,11 @@ export const uploadAvatar = async (req, res) => {
             avatar: user.avatar,
         });
     } catch (error) {
-        return res.status(500).json({
+        await cleanupTempUpload(req.file);
+        if (avatarPublicId) {
+            await cloudinary.uploader.destroy(avatarPublicId).catch(() => {});
+        }
+        return res.status(error.statusCode || 500).json({
             success: false,
             message: error.message,
         });
@@ -313,46 +312,107 @@ export const getSentFollowRequests = async (req, res) => {
 
 
 export const acceptFollowRequest = async (req, res) => {
+    const session = await mongoose.startSession();
     try {
         const currentUserId = req.user.id;
         const requesterId = req.params.id;
-        const user = await User.findById(currentUserId);
 
-        const followRequest = await Follow.findOne({ follower: requesterId, following: currentUserId, status: "pending" });
-        if (!followRequest) {
+        let acceptedFollow = null;
+        let notification = null;
+
+        const performAccept = async (opts = {}) => {
+            const [user, requesterDoc] = await Promise.all([
+                User.findById(currentUserId).select("blockedUsers"),
+                User.findById(requesterId).select("blockedUsers"),
+            ]);
+
+            if (!user) {
+                const err = new Error("User not found");
+                err.statusCode = 404;
+                throw err;
+            }
+
+            if (!requesterDoc) {
+                const err = new Error("Requester not found");
+                err.statusCode = 404;
+                throw err;
+            }
+
+            // Check bidirectional block status before accepting
+            if (user.blockedUsers?.some((id) => id.toString() === requesterId)) {
+                const err = new Error("You have blocked this user");
+                err.statusCode = 403;
+                throw err;
+            }
+
+            if (requesterDoc.blockedUsers?.some((id) => id.toString() === currentUserId)) {
+                const err = new Error("This user has blocked you");
+                err.statusCode = 403;
+                throw err;
+            }
+
+            // Atomic state transition: only one concurrent accept should succeed.
+            acceptedFollow = await Follow.findOneAndUpdate(
+                { follower: requesterId, following: currentUserId, status: "pending" },
+                { $set: { status: "accepted" } },
+                { new: true, ...opts }
+            );
+
+            if (!acceptedFollow) return;
+
+            await Promise.all([
+                User.updateOne({ _id: currentUserId }, { $inc: { followersCount: 1 } }, opts),
+                User.updateOne({ _id: requesterId }, { $inc: { followingCount: 1 } }, opts),
+            ]);
+
+            const existing = await Notification.findOneAndUpdate(
+                { recipient: requesterId, sender: currentUserId, type: "follow_request_accepted" },
+                { $setOnInsert: { recipient: requesterId, sender: currentUserId, type: "follow_request_accepted" } },
+                { upsert: true, returnDocument: "before", ...opts }
+            );
+
+            if (!existing) {
+                notification = await Notification.findOne({
+                    recipient: requesterId,
+                    sender: currentUserId,
+                    type: "follow_request_accepted",
+                });
+            }
+        };
+
+        try {
+            await session.withTransaction(async () => {
+                await performAccept({ session });
+            });
+        } catch (error) {
+            // mongodb-memory-server (and some standalone Mongo deployments) do not support transactions.
+            // Fall back to non-transactional atomic update + idempotent notification.
+            const message = String(error?.message || "");
+            const txNotSupported =
+                message.includes("Transaction numbers are only allowed") ||
+                message.includes("transactions are not supported");
+
+            if (!txNotSupported) throw error;
+
+            await performAccept();
+        }
+
+        if (!acceptedFollow) {
             return res.status(400).json({ message: "No follow request from this user" });
         }
 
-        // Check bidirectional block status before accepting
-        if (user.blockedUsers?.some(id => id.toString() === requesterId)) {
-            return res.status(403).json({ message: "You have blocked this user" });
+        if (notification) {
+            getIO().to(requesterId.toString()).emit("notification:new", {
+                notificationId: notification._id,
+                type: notification.type,
+            });
         }
 
-        const requesterDoc = await User.findById(requesterId).select("blockedUsers");
-        if (!requesterDoc) {
-            return res.status(404).json({ message: "Requester not found" });
-        }
-        if (requesterDoc.blockedUsers?.some(id => id.toString() === currentUserId)) {
-            return res.status(403).json({ message: "This user has blocked you" });
-        }
-
-        await Follow.updateOne({ _id: followRequest._id }, { status: "accepted" });
-        await User.updateOne({ _id: currentUserId }, { $inc: { followersCount: 1 } });
-        await User.updateOne({ _id: requesterId }, { $inc: { followingCount: 1 } });
-
-        const notification = await Notification.create({
-            recipient: requesterId,
-            sender: currentUserId,
-            type: "follow_request_accepted",
-        });
-        getIO().to(requesterId.toString()).emit("notification:new", {
-            notificationId: notification._id,
-            type: notification.type,
-        });
-
-        res.json({ success: true, message: "Follow request accepted" });
+        return res.json({ success: true, message: "Follow request accepted" });
     } catch (err) {
-        res.status(500).json({ message: err.message });
+        return res.status(err.statusCode || 500).json({ message: err.message });
+    } finally {
+        session.endSession();
     }
 };
 
@@ -466,20 +526,62 @@ export const getUserProfile = async (req, res) => {
 
 export const getFollowers = async (req, res) => {
     try {
-        const targetUser = await User.findById(req.params.id);
+        const targetUser = await User.findById(req.params.id).select("isPrivate blockedUsers");
         if (!targetUser) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        const isSelf = req.user.id === req.params.id;
-        const isFollower = await Follow.exists({ follower: req.user.id, following: req.params.id, status: "accepted" });
+        const requesterId = req.user.id;
+
+        // Enforce block restrictions consistently with getUserProfile.
+        // A blocked user must not be able to enumerate the target's social graph.
+        const isBlockedByTarget = targetUser.blockedUsers?.some(
+            (id) => id.toString() === requesterId
+        );
+        if (isBlockedByTarget) {
+            return res.status(403).json({ message: "You are not allowed to view this profile." });
+        }
+
+        const requester = await User.findById(requesterId).select("blockedUsers").lean();
+        const hasBlockedTarget = requester?.blockedUsers?.some(
+            (id) => id.toString() === req.params.id
+        );
+        if (hasBlockedTarget) {
+            return res.status(403).json({ message: "You are not allowed to view this profile." });
+        }
+
+        const isSelf = requesterId === req.params.id;
+        const isFollower = await Follow.exists({ follower: requesterId, following: req.params.id, status: "accepted" });
 
         if (targetUser.isPrivate && !isSelf && !isFollower) {
             return res.status(403).json({ message: "This account is private. Follow to see their followers." });
         }
 
-        const followersList = await Follow.find({ following: req.params.id, status: "accepted" }).populate("follower", "name username avatar");
-        res.status(200).json(followersList.map(f => f.follower));
+        const cursor = req.query.cursor || null;
+        const limit = parseInt(req.query.limit) || 20;
+
+        let filter = { following: req.params.id, status: "accepted" };
+        if (cursor) {
+            if (mongoose.Types.ObjectId.isValid(cursor)) {
+                filter._id = { $lt: cursor };
+            } else {
+                return res.status(400).json({ success: false, message: "Invalid cursor format" });
+            }
+        }
+
+        const followersList = await Follow.find(filter)
+            .sort({ _id: -1 })
+            .limit(limit)
+            .populate("follower", "name username avatar");
+
+        const hasMore = followersList.length === limit;
+        const nextCursor = hasMore ? followersList[followersList.length - 1]._id : null;
+
+        res.status(200).json({
+            followers: followersList.map(f => f.follower),
+            nextCursor,
+            hasMore
+        });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
@@ -487,20 +589,62 @@ export const getFollowers = async (req, res) => {
 
 export const getFollowing = async (req, res) => {
     try {
-        const targetUser = await User.findById(req.params.id);
+        const targetUser = await User.findById(req.params.id).select("isPrivate blockedUsers");
         if (!targetUser) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        const isSelf = req.user.id === req.params.id;
-        const isFollower = await Follow.exists({ follower: req.user.id, following: req.params.id, status: "accepted" });
+        const requesterId = req.user.id;
+
+        // Enforce block restrictions consistently with getUserProfile.
+        // A blocked user must not be able to enumerate the target's social graph.
+        const isBlockedByTarget = targetUser.blockedUsers?.some(
+            (id) => id.toString() === requesterId
+        );
+        if (isBlockedByTarget) {
+            return res.status(403).json({ message: "You are not allowed to view this profile." });
+        }
+
+        const requester = await User.findById(requesterId).select("blockedUsers").lean();
+        const hasBlockedTarget = requester?.blockedUsers?.some(
+            (id) => id.toString() === req.params.id
+        );
+        if (hasBlockedTarget) {
+            return res.status(403).json({ message: "You are not allowed to view this profile." });
+        }
+
+        const isSelf = requesterId === req.params.id;
+        const isFollower = await Follow.exists({ follower: requesterId, following: req.params.id, status: "accepted" });
 
         if (targetUser.isPrivate && !isSelf && !isFollower) {
             return res.status(403).json({ message: "This account is private. Follow to see who they follow." });
         }
 
-        const followingList = await Follow.find({ follower: req.params.id, status: "accepted" }).populate("following", "name username avatar");
-        res.status(200).json(followingList.map(f => f.following));
+        const cursor = req.query.cursor || null;
+        const limit = parseInt(req.query.limit) || 20;
+
+        let filter = { follower: req.params.id, status: "accepted" };
+        if (cursor) {
+            if (mongoose.Types.ObjectId.isValid(cursor)) {
+                filter._id = { $lt: cursor };
+            } else {
+                return res.status(400).json({ success: false, message: "Invalid cursor format" });
+            }
+        }
+
+        const followingList = await Follow.find(filter)
+            .sort({ _id: -1 })
+            .limit(limit)
+            .populate("following", "name username avatar");
+
+        const hasMore = followingList.length === limit;
+        const nextCursor = hasMore ? followingList[followingList.length - 1]._id : null;
+
+        res.status(200).json({
+            following: followingList.map(f => f.following),
+            nextCursor,
+            hasMore
+        });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
