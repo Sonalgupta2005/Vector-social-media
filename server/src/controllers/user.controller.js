@@ -8,6 +8,7 @@ import Notification from "../models/notification.model.js";
 import Post from "../models/post.model.js";
 import Comment from "../models/comment.model.js";
 import { getIO } from "../socket/socket.js";
+import validator from "validator";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
 import { cleanupTempUpload, IMAGE_UPLOAD_LIMITS, validateImageUpload } from "../utils/imageUploadValidation.js";
 
@@ -124,16 +125,16 @@ export const updateProfile = async (req, res) => {
         }
         if (phoneNumber !== undefined) {
             const trimmedPhone = phoneNumber.trim();
-            if (trimmedPhone.length > 20) {
+            if (!trimmedPhone) {
                 return res.status(400).json({
                     success: false,
-                    message: "Phone number must not exceed 20 characters"
+                    message: "Phone number cannot be empty"
                 });
             }
-            if (trimmedPhone !== "" && !/^[+\d][\d\s\-()]*$/.test(trimmedPhone)) {
+            if (!validator.isMobilePhone(trimmedPhone.replace(/[\s-]/g, ""), "any")) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid phone number format"
+                    message: "Please enter a valid phone number"
                 });
             }
             user.phoneNumber = trimmedPhone;

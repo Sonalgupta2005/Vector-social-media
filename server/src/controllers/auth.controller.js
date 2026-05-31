@@ -157,6 +157,7 @@ export const getMe = async (req, res) => {
                 surname: user.surname,
                 email: user.email,
                 username: user.username,
+                phoneNumber: user.phoneNumber,
                 bio: user.bio,
                 description: user.description,
                 avatar: user.avatar,

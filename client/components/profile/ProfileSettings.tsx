@@ -129,6 +129,62 @@ export default function ProfileSettings() {
   };
 
   const handleSave = async () => {
+    // ── Username ─────────────────────────────────────────────────────────────
+    const trimmedUsername = formData.username.trim();
+    if (!trimmedUsername) {
+      return toast.warn("Username cannot be empty.");
+    }
+    if (trimmedUsername.length < 3 || trimmedUsername.length > 30) {
+      return toast.warn("Username must be between 3 and 30 characters.");
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmedUsername)) {
+      return toast.warn(
+        "Username can only contain letters, numbers, underscores, and hyphens."
+      );
+    }
+
+    // ── First name ───────────────────────────────────────────────────────────
+    const trimmedName = formData.name.trim();
+    if (!trimmedName) {
+      return toast.warn("First name cannot be empty.");
+    }
+    if (trimmedName.length < 2 || trimmedName.length > 100) {
+      return toast.warn("First name must be between 2 and 100 characters.");
+    }
+
+    // ── Last name ────────────────────────────────────────────────────────────
+    if (formData.surname.length > 100) {
+      return toast.warn("Last name must not exceed 100 characters.");
+    }
+
+    // ── Phone number ─────────────────────────────────────────────────────────
+    const trimmedPhone = formData.phoneNumber.trim();
+    if (!trimmedPhone) {
+      return toast.warn("Phone number cannot be empty.");
+    }
+    const cleanedPhone = trimmedPhone.replace(/[\s-]/g, "");
+    if (!/^\d{10}$/.test(cleanedPhone)) {
+      return toast.warn("Please enter a valid 10-digit phone number.");
+    }
+
+    // ── Bio ──────────────────────────────────────────────────────────────────
+    const trimmedBio = formData.bio.trim();
+    if (!trimmedBio) {
+      return toast.warn("Bio cannot be empty.");
+    }
+    if (formData.bio.length > 30) {
+      return toast.warn("Bio must not exceed 30 characters.");
+    }
+
+    // ── Description ──────────────────────────────────────────────────────────
+    const trimmedDescription = formData.description.trim();
+    if (!trimmedDescription) {
+      return toast.warn("Description cannot be empty.");
+    }
+    if (formData.description.length > 200) {
+      return toast.warn("Description must not exceed 200 characters.");
+    }
+
     try {
       setLoading(true);
 

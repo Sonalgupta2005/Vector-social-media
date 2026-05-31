@@ -59,14 +59,34 @@ export default function RegistrationForm() {
 
     const cleanedPhone = phoneNumber.replace(/[\s-]/g, "");
 
-    if (!name.trim()) return setFormError("Enter first name");
-    if (!surname.trim()) return setFormError("Enter last name");
-    if (!email.trim()) return setFormError("Enter email");
-    if (!emailRegex.test(email.trim())) return setFormError("Please enter a valid email!");
-    if (!phoneNumber.trim()) return setFormError("Enter phone number");
-    if (!phoneRegex.test(cleanedPhone)) return setFormError("Please enter a valid phone number!");
-    if (!password.trim()) return setFormError("Enter password");
-    if (password.length < 6) return setFormError("Password must be at least 6 characters!");
+
+if (!name.trim()) {
+      return setFormError("Enter first name");
+    }
+    if (name.trim().length < 2 || name.trim().length > 100) {
+      return setFormError("First name must be between 2 and 100 characters.");
+    }
+    if (surname.trim().length > 100) {
+      return setFormError("Last name must not exceed 100 characters.");
+    }
+    if (!email.trim()) {
+      return setFormError("Enter email");
+    }
+    if (!emailRegex.test(email.trim())) {
+      return setFormError("Please enter a valid email!");
+    }
+    if (!phoneNumber.trim()) {
+      return setFormError("Enter phone number");
+    }
+    if (!phoneRegex.test(cleanedPhone)) {
+      return setFormError("Please enter a valid phone number!");
+    }
+    if (!password.trim()) {
+      return setFormError("Enter password");
+    }
+    if (password.length < 6) {
+      return setFormError("Password must be at least 6 characters!");
+    }
     if (!passwordRegex.test(password)) {
       return setFormError(
         "Password must contain at least one uppercase letter, one lowercase letter, and one number!"
@@ -78,10 +98,29 @@ export default function RegistrationForm() {
   };
 
   const handleSubmit = async () => {
-    if (!username.trim()) return toast.warn("Enter username");
-    if (!bio.trim()) return toast.warn("Enter bio");
-    if (!description.trim()) return toast.warn("Enter description");
 
+    if (!username.trim()) {
+      return toast.warn("Enter username");
+    }
+    if (username.trim().length < 3 || username.trim().length > 30) {
+      return toast.warn("Username must be between 3 and 30 characters.");
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(username.trim())) {
+      return toast.warn("Username can only contain letters, numbers, underscores, and hyphens.");
+    }
+    if (!bio.trim()) {
+      return toast.warn("Enter bio");
+    }
+    if (bio.length > 30) {
+      return toast.warn("Bio must not exceed 30 characters.");
+    }
+    if (!description.trim()) {
+      return toast.warn("Enter description");
+    }
+    if (description.length > 200) {
+      return toast.warn("Description must not exceed 200 characters.");
+    }
+    
     try {
       setLoading(true);
 
