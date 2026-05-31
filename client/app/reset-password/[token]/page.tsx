@@ -6,7 +6,9 @@ import { toast } from "react-toastify";
 import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getErrorMessage } from "@/lib/error";
 
+// Same rule as registerSchema and resetPasswordSchema on the backend
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{6,}$/;
 
 export default function ResetPasswordPage({
@@ -63,11 +65,7 @@ export default function ResetPasswordPage({
                 toast.error(data.message);
             }
         } catch (error: unknown) {
-            if (error instanceof Error) {
-                toast.error(error.message);
-            } else {
-                toast.error("Something went wrong");
-            }
+            toast.error(getErrorMessage(error));
         } finally {
             setLoading(false);
         }
@@ -122,12 +120,13 @@ export default function ResetPasswordPage({
                         </span>
                     </div>
 
-                    {/* type="submit" — no onClick needed */}
+                    {/* ✅ type="submit" — no onClick needed */}
                     <Button
                         type="submit"
                         disabled={loading}
-                        className={`w-full mt-4 cursor-pointer dark:text-white ${loading ? "bg-blue-400" : "bg-blue-500 hover:bg-blue-600"
-                            }`}
+                        className={`w-full mt-4 cursor-pointer dark:text-white ${
+                            loading ? "bg-blue-400" : "bg-blue-500 hover:bg-blue-600"
+                        }`}
                     >
                         {loading ? "Resetting..." : "Reset Password"}
                     </Button>
