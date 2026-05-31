@@ -50,7 +50,7 @@ describe('Auth Endpoints', () => {
         .post('/api/auth/register')
         .send(validUser);
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(201);
       expect(response.body.success).toBe(true);
       expect(response.body.message).toBe("Account created successfully");
 

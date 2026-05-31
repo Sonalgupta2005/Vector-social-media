@@ -122,7 +122,7 @@ if (!/^\d{10}$/.test(cleanedPhone)) {
 
         res.cookie("token", token, getCookieOptions());
 
-        return res.status(200).json({
+        return res.status(201).json({
             success: true,
             message: "Account created successfully",
         });
