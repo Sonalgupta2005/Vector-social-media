@@ -264,27 +264,37 @@ export default function PostCard({ post, setPost }: PostCardProps) {
                 });
             } else {
                 await navigator.clipboard.writeText(postUrl);
-                toast.success("Post link copied to clipboard");
-            }
-
-            // Increment share count in DB
-            await axios.put(`${BACKEND_URL}/api/posts/${post._id}/share`, {}, { withCredentials: true });
+                // Increment share count in DB
+            await axios.put(
+                `${BACKEND_URL}/api/posts/${post._id}/share`,
+                {},
+                { withCredentials: true }
+            );
 
             // Update local state
             if (setPost) {
-                setPost((prev) => prev ? ({
-                    ...prev,
-                    sharesCount: (prev.sharesCount || 0) + 1,
-                }) : prev);
+                setPost((prev) =>
+                    prev
+                        ? {
+                            ...prev,
+                            sharesCount: (prev.sharesCount || 0) + 1,
+                        }
+                        : prev
+                );
             } else {
-                setPosts(prev =>
-                    prev.map(p =>
+                setPosts((prev) =>
+                    prev.map((p) =>
                         p._id === post._id
                             ? { ...p, sharesCount: (p.sharesCount || 0) + 1 }
                             : p
                     )
                 );
             }
+
+                toast.success("Post link copied to clipboard");
+            }
+
+            
 
         } catch {
             // share dismissed or failed
