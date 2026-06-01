@@ -114,7 +114,6 @@ export default function PostCard({ post, setPost }: PostCardProps) {
     const handleLike = async () => {
         const previousLikes = localLikes;
         try {
-            // 🚨 guard: don't proceed if user id missing
             if (!userData?.id) {
                 toast.error("User not authenticated");
                 return;
@@ -129,36 +128,26 @@ export default function PostCard({ post, setPost }: PostCardProps) {
                 ? uniqueLikes.filter((like) => getLikeUserId(like) !== userData.id)
                 : getUniqueLikes([...uniqueLikes, currentUserLike ?? userData.id]);
 
-            // ✅ update local state safely
             setLocalLikes(updatedLikes);
             
             if (setPost) {
                 setPost(prev =>
-                    prev
-                        ? {
-                            ...prev,
-                            likes: updatedLikes,
-                        }
-                        : prev
+                    prev ? { ...prev, likes: updatedLikes } : prev
                 );
             } else {
                 setPosts(prev =>
                     prev.map(p =>
-                        p._id === post._id
-                            ? { ...p, likes: updatedLikes }
-                            : p
+                        p._id === post._id ? { ...p, likes: updatedLikes } : p
                     )
                 );
             }
 
-            // ✅ API call
             await axios.put(
                 `${BACKEND_URL}/api/posts/${post._id}/like`,
                 {},
                 { withCredentials: true }
             );
         } catch (error) {
-            // 🚨 revert optimistic update
             setLocalLikes(previousLikes);
             if (setPost) {
                 setPost(prev => prev ? { ...prev, likes: previousLikes } : prev);
@@ -201,10 +190,7 @@ export default function PostCard({ post, setPost }: PostCardProps) {
     useEffect(() => {
         if (!menuOpen) return;
         const handleOutsideClick = (e: MouseEvent) => {
-            if (
-                menuRef.current &&
-                !menuRef.current.contains(e.target as Node)
-            ) {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
                 setMenuOpen(false);
             }
         };
@@ -215,9 +201,7 @@ export default function PostCard({ post, setPost }: PostCardProps) {
     }, [menuOpen]);
 
     useEffect(() => {
-        if (!post.image) {
-            return;
-        }
+        if (!post.image) return;
 
         const timeoutId = setTimeout(() => {
             setImageState((prev) => {
@@ -225,17 +209,13 @@ export default function PostCard({ post, setPost }: PostCardProps) {
                 if (prev.src === currentSrc && (prev.loaded || prev.failed)) {
                     return prev;
                 }
-
-                return {
-                    src: currentSrc,
-                    loaded: true,
-                    failed: true,
-                };
+                return { src: currentSrc, loaded: true, failed: true };
             });
         }, 8000);
 
         return () => clearTimeout(timeoutId);
     }, [post.image]);
+
     useEffect(() => {
         setBookmarked(post.isBookmarked ?? false);
     }, [post.isBookmarked]);
@@ -244,7 +224,6 @@ export default function PostCard({ post, setPost }: PostCardProps) {
         setLocalLikes(post.likes);
     }, [post.likes]);
 
-    // prevent crash if author missing
     if (!post?.author) return null;
 
     const isCurrentImageLoaded =
@@ -267,10 +246,8 @@ export default function PostCard({ post, setPost }: PostCardProps) {
                 toast.success("Post link copied to clipboard");
             }
 
-            // Increment share count in DB
             await axios.put(`${BACKEND_URL}/api/posts/${post._id}/share`, {}, { withCredentials: true });
 
-            // Update local state
             if (setPost) {
                 setPost((prev) => prev ? ({
                     ...prev,
@@ -285,73 +262,74 @@ export default function PostCard({ post, setPost }: PostCardProps) {
                     )
                 );
             }
-
         } catch {
             // share dismissed or failed
         }
         setMenuOpen(false);
     };
+
     const handleBookmark = async (e: React.MouseEvent) => {
         e.stopPropagation();
         if (!userData?.id) {
-        toast.error("User not authenticated");
-        return;
+            toast.error("User not authenticated");
+            return;
         }
         if (bookmarkLoading) return;
 
-        setBookmarked((prev) => !prev); // optimistic
+        setBookmarked((prev) => !prev);
         setBookmarkLoading(true);
 
         try {
-        const res = await axios.post(
-            `${BACKEND_URL}/api/posts/${post._id}/bookmark`,
-            {},
-            { withCredentials: true },
-        );
-        setBookmarked(res.data.bookmarked);
+            const res = await axios.post(
+                `${BACKEND_URL}/api/posts/${post._id}/bookmark`,
+                {},
+                { withCredentials: true },
+            );
+            setBookmarked(res.data.bookmarked);
 
-        if (setPost) {
-            setPost((prev) =>
-            prev ? { ...prev, isBookmarked: res.data.bookmarked } : prev,
-            );
-        } else {
-            setPosts((prev) =>
-            prev.map((p) =>
-                p._id === post._id
-                ? { ...p, isBookmarked: res.data.bookmarked }
-                : p,
-            ),
-            );
-        }
-        toast.success(res.data.bookmarked ? "Post saved" : "Removed from saved");
+            if (setPost) {
+                setPost((prev) =>
+                    prev ? { ...prev, isBookmarked: res.data.bookmarked } : prev,
+                );
+            } else {
+                setPosts((prev) =>
+                    prev.map((p) =>
+                        p._id === post._id
+                            ? { ...p, isBookmarked: res.data.bookmarked }
+                            : p,
+                    ),
+                );
+            }
+            toast.success(res.data.bookmarked ? "Post saved" : "Removed from saved");
         } catch (error) {
-        setBookmarked((prev) => !prev); // revert
-        if (axios.isAxiosError(error) && error.response?.status === 403) {
-            toast.error("Action blocked");
-        } else {
-            toast.error("Failed to update bookmark");
-        }
+            setBookmarked((prev) => !prev);
+            if (axios.isAxiosError(error) && error.response?.status === 403) {
+                toast.error("Action blocked");
+            } else {
+                toast.error("Failed to update bookmark");
+            }
         } finally {
-        setBookmarkLoading(false);
+            setBookmarkLoading(false);
         }
     };
+
     return (
         <div className="content-card glass-hover relative overflow-clip cursor-pointer"
             onClick={openPost}>
             <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center flex-wrap sm:justify-between w-[90%]">
                     <div className="flex items-center gap-2">
-                    <div className="h-8 md:h-12 w-8 md:w-12 rounded-full transition-all duration-200" onClick={(e) => { e.stopPropagation(); openUserProfile(); }}>
-                        <Avatar 
-                            src={post.author?.avatar} 
-                            alt={post.author?.name || "Post author"} 
-                            className="h-full w-full" 
-                        />
-                    </div>
-                    <span className="ml-1 font-semibold text-foreground transition-all duration-200 hover:text-blue-500" onClick={(e) => { e.stopPropagation(); openUserProfile(); }}>{post?.author?.name}</span>
-                    <span className="surface-text-muted text-[0.9rem] transition-all duration-200 hover:text-foreground" onClick={(e) => { e.stopPropagation(); openUserProfile(); }}>
-                        @{post?.author?.username}
-                    </span>
+                        <div className="h-8 md:h-12 w-8 md:w-12 rounded-full transition-all duration-200" onClick={(e) => { e.stopPropagation(); openUserProfile(); }}>
+                            <Avatar 
+                                src={post.author?.avatar} 
+                                alt={post.author?.name || "Post author"} 
+                                className="h-full w-full" 
+                            />
+                        </div>
+                        <span className="ml-1 font-semibold text-foreground transition-all duration-200 hover:text-blue-500" onClick={(e) => { e.stopPropagation(); openUserProfile(); }}>{post?.author?.name}</span>
+                        <span className="surface-text-muted text-[0.9rem] transition-all duration-200 hover:text-foreground" onClick={(e) => { e.stopPropagation(); openUserProfile(); }}>
+                            @{post?.author?.username}
+                        </span>
                     </div>
                     <div className="w-full sm:w-auto">
                         <p className="text-[0.9rem] font-semibold text-blue-500 flex items-center gap-1.5 truncate">
@@ -373,23 +351,25 @@ export default function PostCard({ post, setPost }: PostCardProps) {
                     {menuOpen && (
                         <div className="absolute overflow-clip top-0 right-0 w-30 bg-background border border-border rounded-md shadow-lg z-50">
                             <button
-    className="w-full cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-black/3 dark:hover:bg-white/5"
-    onClick={handleShare}
->
-    <Forward size={14} />
-    Share post
-</button>
+                                className="w-full cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-black/3 dark:hover:bg-white/5"
+                                onClick={handleShare}
+                            >
+                                <Forward size={14} />
+                                Share post
+                            </button>
                             {!isOwner && (
-<button
-className="w-full cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
-onClick={(e) => {
-e.stopPropagation();
-setMenuOpen(false);
-setShowReportModal(true);
-}}
-> <Flag size={14} />
-Report post </button>
-)}
+                                <button
+                                    className="w-full cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setMenuOpen(false);
+                                        setShowReportModal(true);
+                                    }}
+                                >
+                                    <Flag size={14} />
+                                    Report post
+                                </button>
+                            )}
 
                             {isOwner && (
                                 <button className="w-full cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-black/3 dark:hover:bg-white/5"
@@ -414,7 +394,6 @@ Report post </button>
                                     Delete post
                                 </button>
                             )}
-                           
                         </div>
                     )}
                 </div>
@@ -442,7 +421,12 @@ Report post </button>
                         <Image
                             key={post.image}
                             src={post.image}
-                            alt="Post attachment"
+                            // --- FIX: Meaningful alt using post content and author username ---
+                            alt={
+                                post.content
+                                    ? `Post image by ${post.author?.username}: ${post.content.slice(0, 100)}`
+                                    : `Post image by ${post.author?.username}`
+                            }
                             width={1200}
                             height={800}
                             onLoad={() =>
@@ -459,8 +443,9 @@ Report post </button>
                                     failed: true,
                                 });
                             }}
-                            className={`w-full h-full object-cover transition-opacity duration-200 ${isCurrentImageLoaded ? "opacity-100" : "opacity-0"
-                                }`}
+                            className={`w-full h-full object-cover transition-opacity duration-200 ${
+                                isCurrentImageLoaded ? "opacity-100" : "opacity-0"
+                            }`}
                         />
                     ) : (
                         <div className="flex h-60 items-center justify-center bg-black/5 px-4 text-center text-sm text-muted-foreground dark:bg-white/5">
@@ -469,6 +454,7 @@ Report post </button>
                     )}
                 </div>
             )}
+
             <div className="flex w-full gap-x-2 border-t border-border/80 pt-3 text-foreground sm:justify-between">
                 <div className="surface-text-muted flex w-full items-center gap-4 text-sm sm:w-2/3 sm:justify-between">
                     <p className="flex flex-col text-center gap-2 sm:flex-row items-center cursor-pointer hover:text-blue-500 md:w-[20%] justify-center">
@@ -488,6 +474,7 @@ Report post </button>
                             {likeCount} {likeCount === 1 ? 'Like' : 'Likes'}
                         </button>
                     </div>
+
                     <div className="flex flex-col text-center sm:flex-row gap-1 items-center md:w-[20%] justify-center">
                         <button
                             onClick={handleBookmark}
@@ -496,8 +483,8 @@ Report post </button>
                             aria-label={bookmarked ? "Remove bookmark" : "Bookmark post"}
                         >
                             {bookmarked
-                            ? <BookmarkCheck className="h-4.5 md:h-5 text-blue-500" fill="currentColor" />
-                            : <Bookmark className="h-4.5 md:h-5" />
+                                ? <BookmarkCheck className="h-4.5 md:h-5 text-blue-500" fill="currentColor" />
+                                : <Bookmark className="h-4.5 md:h-5" />
                             }
                         </button>
                         <span className="text-sm">{bookmarked ? "Saved" : "Save"}</span>
