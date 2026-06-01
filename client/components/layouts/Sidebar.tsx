@@ -41,9 +41,11 @@ export default function Sidebar() {
     try {
       const { data } = await axios.post(BACKEND_URL + "/api/auth/logout", {}, { withCredentials: true });
       if (data.success) {
-        toast.success("Logged out successfully!");
+        socket.disconnect();
         setIsLoggedIn(false);
         setUserData(null);
+        setPosts([]);
+        toast.success("Logged out successfully!");
         router.replace("/auth/login");
       }
     } catch (error: unknown) {
