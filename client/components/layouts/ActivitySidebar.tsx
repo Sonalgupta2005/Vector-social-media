@@ -75,7 +75,7 @@ export default function ActivitySidebar() {
       }
     };
     fetchUsers();
-  }, [BACKEND_URL, query, userData?.id]);
+  }, [BACKEND_URL, userData?.id]);
 
   useEffect(() => {
     if (!userData?.id) {
