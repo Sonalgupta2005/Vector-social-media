@@ -9,6 +9,7 @@ import { ArrowRight, Search, Trash2 } from "lucide-react";
 import ConfirmModal from "@/components/modals/DeleteWarning";
 import { toast } from "react-toastify";
 import SkeletonLoader from "@/components/loaders/SkeletonLoader";
+import { socket } from "@/socket/socket";
 import type { Conversation, UserSummary } from "@/lib/types";
 
 export default function ChatListPage() {
@@ -57,6 +58,22 @@ export default function ChatListPage() {
 
         if (userData?.id) void fetchConversations();
     }, [BACKEND_URL, userData]);
+
+    useEffect(() => {
+        if (!userData?.id) return;
+        const handleConversationDeleted = (data: { conversationId: string }) => {
+            setConversations((prev) => prev.filter((c) => c._id !== data.conversationId));
+            setUnreadCounts((prev) => {
+                const next = { ...prev };
+                delete next[data.conversationId];
+                return next;
+            });
+        };
+        socket.on("conversation:deleted", handleConversationDeleted);
+        return () => {
+            socket.off("conversation:deleted", handleConversationDeleted);
+        };
+    }, [userData?.id]);
 
     useEffect(() => {
         const filtered = conversations.filter((convo) => {
