@@ -535,14 +535,29 @@ export const getPostsByUser = async (req, res) => {
             excludeUserIds = [...blockedIds, ...blockerIds];
         }
 
-        const posts = await Post.find({ author: userId })
+        const cursor = req.query.cursor;
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
+
+        let postFilter = { author: userId };
+        if (cursor) {
+            if (mongoose.Types.ObjectId.isValid(cursor)) {
+                postFilter._id = { $lt: cursor };
+            } else {
+                return res.status(400).json({ success: false, message: "Invalid cursor format" });
+            }
+        }
+
+        const posts = await Post.find(postFilter)
             .populate("author", "username name avatar")
             .populate(
                 excludeUserIds.length
                     ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
                     : { path: "likes", select: "username name avatar _id" }
             )
-            .sort({ createdAt: -1 });
+            .sort({ _id: -1 })
+            .limit(limit);
+        const hasMore = posts.length === limit;
+        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
         const userBookmarkSet = req.user?.bookmarks
         ? new Set(req.user.bookmarks.map(String))
         : new Set();
@@ -553,6 +568,9 @@ export const getPostsByUser = async (req, res) => {
         return res.status(200).json({
         success: true,
         posts: postsWithMeta,
+        hasMore,
+        nextCursor,
+        limit,
         });
     } catch (error) {
         return res.status(500).json({
