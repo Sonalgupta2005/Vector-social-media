@@ -53,7 +53,7 @@ export default function EditPostModal({
       const formData = new FormData();
       formData.append("content", content.trim());
       formData.append("intent", intent);
-      formData.append("removeImage", removeImage);
+      formData.append("removeImage", String(removeImage));
       if (imageFile) {
         formData.append("image", imageFile);
       }
