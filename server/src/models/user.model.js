@@ -89,6 +89,11 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false, // Default is Public
     },
+
+    searchable: {
+      type: Boolean,
+      default: true,
+    },
     
     resetToken: String,
     resetTokenExpiry: Date,
@@ -116,6 +121,14 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.index({ name: "text", username: "text" });
+userSchema.index({ searchable: 1 });
+
+userSchema.pre("save", function (next) {
+  if (this.isModified("isPrivate")) {
+    this.searchable = !this.isPrivate;
+  }
+  next();
+});
 
 const User = mongoose.model("User", userSchema);
 
