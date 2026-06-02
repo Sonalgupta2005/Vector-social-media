@@ -55,14 +55,10 @@ const postSchema = new mongoose.Schema({
 
 postSchema.index({ content: "text", intent: "text" });
 
-postSchema.pre("save", function (next) {
+postSchema.pre("save", function () {
   if (typeof this.content === "string") {
     this.content = this.content.trim();
-    if (!this.content) {
-      this.content = undefined;
-    }
   }
-  next();
 });
 
 export default mongoose.model("Post", postSchema);
