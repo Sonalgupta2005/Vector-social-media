@@ -198,6 +198,7 @@ export const getUnreadCount = async (req, res) => {
       conversation: conversationId,
       sender: { $ne: req.user._id },
       isRead: { $ne: true },
+      isDeleted: { $ne: true },
     });
 
     res.json({ unreadCount });
@@ -225,6 +226,7 @@ export const markConversationAsRead = async (req, res) => {
         conversation: conversationId,
         sender: { $ne: req.user._id },
         isRead: { $ne: true },
+        isDeleted: { $ne: true },
       },
       { $set: { isRead: true } }
     );
