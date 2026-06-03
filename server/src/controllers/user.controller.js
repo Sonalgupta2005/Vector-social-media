@@ -729,7 +729,7 @@ export const getSuggestedUsers = async (req, res) => {
 
 export const searchUsers = async (req, res) => {
     try {
-        const { query } = req.query;
+        const { query, cursor } = req.query;
 
         if (!query) {
             return res.json({
@@ -738,6 +738,8 @@ export const searchUsers = async (req, res) => {
             });
         }
 
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+
         const currentUserId = req.user._id || req.user.id;
         const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
         const blockerIds = blockers.map(u => u._id);
@@ -745,25 +747,27 @@ export const searchUsers = async (req, res) => {
         const excludeIds = [...blockedIds, ...blockerIds, currentUserId];
         const postExcludeIds = [...blockedIds, ...blockerIds];
 
+        const cursorFilter = cursor && mongoose.Types.ObjectId.isValid(cursor)
+            ? { _id: { $lt: new mongoose.Types.ObjectId(cursor) } }
+            : {};
+
         const users = await User.find({
-            $and: [
-                { $text: { $search: query } },
-                { _id: { $nin: excludeIds } }
-            ]
+            $text: { $search: query },
+            _id: { $nin: excludeIds },
+            ...cursorFilter,
         })
+            .sort({ _id: -1 })
+            .limit(limit + 1)
             .select("name username avatar")
-            .limit(10)
             .lean();
+
+        const hasNextPage = users.length > limit;
+        const pageUsers = hasNextPage ? users.slice(0, limit) : users;
 
         const followings = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
         const followingUserIds = new Set(followings.map(f => f.following.toString()));
 
-        const visibleAuthorIds = new Set([
-            ...followingUserIds,
-            currentUserId.toString(),
-        ]);
-
-        const searchedUserIds = users.map((user) => user._id);
+        const searchedUserIds = pageUsers.map((user) => user._id);
         const requestedUsers = await Follow.find({
             following: { $in: searchedUserIds },
             follower: currentUserId,
@@ -774,34 +778,33 @@ export const searchUsers = async (req, res) => {
             requestedUsers.map((user) => user.following.toString())
         );
 
-        const usersWithFollowState = users.map((user) => ({
+        const usersWithFollowState = pageUsers.map((user) => ({
             ...user,
             isFollowedByCurrentUser: followingUserIds.has(user._id.toString()),
             isRequestedByCurrentUser: requestedUserIds.has(user._id.toString()),
         }));
 
-        const privateNotVisibleUsers = await User.find({
-            _id: { $nin: Array.from(visibleAuthorIds) },
+        const privateNotVisible = await User.find({
             isPrivate: true,
-        })
-            .select("_id")
-            .lean();
-
-        const privateNotVisibleIds = privateNotVisibleUsers.map((user) => user._id);
+            _id: { $nin: [...Array.from(followingUserIds), currentUserId] },
+        }).select("_id").lean();
 
         const posts = await Post.find({
-            $and: [
-                { $text: { $search: query } },
-                { author: { $nin: postExcludeIds } },
-                { author: { $nin: privateNotVisibleIds } }
-            ]
+            $text: { $search: query },
+            author: { $nin: [...postExcludeIds, ...privateNotVisible.map(u => u._id)] },
         })
             .populate("author", "username")
-            .limit(10);
+            .limit(limit);
+
+        const nextCursor = hasNextPage
+            ? pageUsers[pageUsers.length - 1]._id.toString()
+            : null;
 
         res.json({
             users: usersWithFollowState,
-            posts
+            posts,
+            nextCursor,
+            hasNextPage,
         });
 
     } catch {
