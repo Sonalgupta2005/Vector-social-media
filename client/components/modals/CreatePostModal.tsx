@@ -34,6 +34,21 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
     const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL!;
     const MAX_CHARS = 500;
 
+    // --- FIX: Focus trap — traps Tab/Shift+Tab inside modal, restores focus on close ---
+    const focusTrapRef = useFocusTrap(visible);
+
+    // --- FIX: Close modal on Esc key ---
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                handleClose();
+            }
+        };
+        document.addEventListener("keydown", handleKeyDown);
+        return () => document.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     useEffect(() => {
         const savedDraft = localStorage.getItem("postDraft");
 
@@ -165,18 +180,41 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
             setLoading(false);
         }
     };
+
+    // -------------------------------------------------------------------
+    // FIX: Save Draft now only saves what can actually be restored.
+    // File objects (imageFile) are binary and cannot be serialised into
+    // localStorage — so the draft only stores text content and intent,
+    // exactly what the restore flow reads back.
+    //
+    // The Save Draft button is therefore disabled when the only thing
+    // present is a selected image with no text or intent chosen.
+    // This prevents the misleading UX where a user saves a draft and
+    // reopens the modal to find their image gone.
+    //
+    // canSaveDraft mirrors exactly what the draft actually persists:
+    //   content (text) OR intent selection.
+    // -------------------------------------------------------------------
+    const canSaveDraft = content.trim().length > 0 || intent !== "";
+
     const handleSaveDraft = () => {
-    const draft = {
-        content,
-        intent,
-    };
+        const draft = {
+            content,
+            intent,
+            savedAt: new Date().toISOString(),
+        };
 
-    localStorage.setItem(
-        "postDraft",
-        JSON.stringify(draft)
-    );
+        localStorage.setItem("postDraft", JSON.stringify(draft));
 
-    toast.success("Draft saved!");
+        // Warn the user if they also have an image selected, since it
+        // cannot be saved as part of the draft.
+        if (imageFile) {
+            toast.success("Draft saved! Note: your selected image was not saved and will need to be re-attached.");
+        } else {
+            toast.success("Draft saved!");
+        }
+
+        setLastSaved(new Date());
     };
 
     const intents = [
@@ -189,22 +227,31 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
 
     return (
         <>
+            {/* --- FIX: aria-hidden hides background from screen readers --- */}
             <div 
                 onClick={handleClose} 
+                aria-hidden="true"
                 className={cn(
                     "fixed inset-0 z-60 bg-black/60 backdrop-blur-sm transition-opacity duration-300",
                     visible ? "opacity-100" : "opacity-0"
                 )} 
             />
 
-            <div className={cn(
-                "fixed z-60 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] md:w-[45vw] lg:w-[50vw]",
-                "glass-surface-strong rounded-3xl shadow-2xl p-0 overflow-hidden transition-all duration-300 ease-out border-t border-white/20",
-                visible ? "opacity-100 scale-100 translate-y-[-50%]" : "opacity-0 scale-95 translate-y-[-48%]"
-            )}>
+            {/* --- FIX: role="dialog", aria-modal, aria-labelledby added; focusTrapRef attached --- */}
+            <div
+                ref={focusTrapRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="create-post-modal-title"
+                className={cn(
+                    "fixed z-60 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] md:w-[45vw] lg:w-[50vw]",
+                    "glass-surface-strong rounded-3xl shadow-2xl p-0 overflow-hidden transition-all duration-300 ease-out border-t border-white/20",
+                    visible ? "opacity-100 scale-100 translate-y-[-50%]" : "opacity-0 scale-95 translate-y-[-48%]"
+                )}>
                 <div className="flex justify-between items-center px-6 pt-5 border-b border-white/10">
                     <div className="flex items-center gap-3">
-                        <h2 className="text-xl font-bold text-foreground">Create New Post</h2>
+                        {/* --- FIX: id matches aria-labelledby --- */}
+                        <h2 id="create-post-modal-title" className="text-xl font-bold text-foreground">Create New Post</h2>
                         <button
                             aria-expanded={showGuidelines}
                             onClick={() => setShowGuidelines((s) => !s)}
@@ -215,7 +262,8 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
                         </button>
                     </div>
                     <button 
-                        onClick={handleClose} 
+                        onClick={handleClose}
+                        aria-label="Close modal"
                         className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-foreground/70 hover:text-foreground"
                     >
                         <X size={20} />
@@ -364,6 +412,7 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
                             </div>
                             <button 
                                 onClick={() => { setImageFile(null); setImagePreview(null); }} 
+                                aria-label="Remove image"
                                 className="absolute top-3 right-3 bg-red-500/90 p-2 rounded-full text-white shadow-xl hover:bg-red-600 transition-all scale-90 group-hover:scale-100"
                             >
                                 <Trash2 size={18} />
@@ -380,26 +429,36 @@ export default function CreatePostModal({onClose,onPostCreated}: CreateModalProp
                                 className="rounded-xl px-4 font-semibold border flex-1"
                             >
                                 Cancel
-                        </Button>
+                            </Button>
 
-                        <Button
-                            variant="secondary"
-                            onClick={handleSaveDraft}
-                            disabled={!content.trim() && !imageFile}
-                            className="rounded-xl px-4 font-semibold flex-1"
-                        >
-                            Save Draft
-                        </Button>
+                            {/* -------------------------------------------------------------------
+                                FIX: disabled now uses canSaveDraft instead of (!content.trim() && !imageFile).
+                                Previously the button enabled as soon as an image was selected, even
+                                with no text or intent — but handleSaveDraft never saved imageFile
+                                (File objects cannot be stored in localStorage). This meant clicking
+                                Save Draft with an image-only state silently lost the image.
+                                Now the button only enables when content or intent is present,
+                                i.e. when there is actually something that can be restored later.
+                                If the user has both text AND an image, the draft saves the text and
+                                a toast warns them the image will need to be re-attached.
+                            ------------------------------------------------------------------- */}
+                            <Button
+                                variant="secondary"
+                                onClick={handleSaveDraft}
+                                disabled={!canSaveDraft}
+                                className="rounded-xl px-4 font-semibold flex-1"
+                            >
+                                Save Draft
+                            </Button>
 
-                        <Button
-                            disabled={loading || !intent || (!content.trim() && !imageFile)}
-                            onClick={handlePost}
-                            className={cn(
-                                "rounded-xl flex-1 px-6 font-bold shadow-lg transition-all active:scale-95",
-                                "bg-primary text-primary-foreground hover:opacity-90"
-                            )}
-                        >
-                            
+                            <Button
+                                disabled={loading || !intent || (!content.trim() && !imageFile)}
+                                onClick={handlePost}
+                                className={cn(
+                                    "rounded-xl flex-1 px-6 font-bold shadow-lg transition-all active:scale-95",
+                                    "bg-primary text-primary-foreground hover:opacity-90"
+                                )}
+                            >
                                 {loading ? (
                                     <div className="flex items-center gap-2">
                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
