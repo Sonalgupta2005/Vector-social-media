@@ -9,6 +9,7 @@ import axios from "axios";
 import { useRouter } from "next/navigation";
 import type { Post } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 type CreateModalProps = {
     onClose: () => void;
@@ -33,6 +34,21 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreateModalP
 
     const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL!;
     const MAX_CHARS = 500;
+
+    // --- FIX: Focus trap — traps Tab/Shift+Tab inside modal, restores focus on close ---
+    const focusTrapRef = useFocusTrap(visible);
+
+    // --- FIX: Close modal on Esc key ---
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                handleClose();
+            }
+        };
+        document.addEventListener("keydown", handleKeyDown);
+        return () => document.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         const savedDraft = localStorage.getItem("postDraft");
@@ -196,22 +212,31 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreateModalP
 
     return (
         <>
-            <div
-                onClick={handleClose}
+            {/* --- FIX: aria-hidden hides background from screen readers --- */}
+            <div 
+                onClick={handleClose} 
+                aria-hidden="true"
                 className={cn(
                     "fixed inset-0 z-60 bg-black/60 backdrop-blur-sm transition-opacity duration-300",
                     visible ? "opacity-100" : "opacity-0"
                 )}
             />
 
-            <div className={cn(
-                "fixed z-60 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] md:w-[45vw] lg:w-[50vw]",
-                "glass-surface-strong rounded-3xl shadow-2xl p-0 overflow-hidden transition-all duration-300 ease-out border-t border-white/20",
-                visible ? "opacity-100 scale-100 translate-y-[-50%]" : "opacity-0 scale-95 translate-y-[-48%]"
-            )}>
+            {/* --- FIX: role="dialog", aria-modal, aria-labelledby added; focusTrapRef attached --- */}
+            <div
+                ref={focusTrapRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="create-post-modal-title"
+                className={cn(
+                    "fixed z-60 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] md:w-[45vw] lg:w-[50vw]",
+                    "glass-surface-strong rounded-3xl shadow-2xl p-0 overflow-hidden transition-all duration-300 ease-out border-t border-white/20",
+                    visible ? "opacity-100 scale-100 translate-y-[-50%]" : "opacity-0 scale-95 translate-y-[-48%]"
+                )}>
                 <div className="flex justify-between items-center px-6 pt-5 border-b border-white/10">
                     <div className="flex items-center gap-3">
-                        <h2 className="text-xl font-bold text-foreground">Create New Post</h2>
+                        {/* --- FIX: id matches aria-labelledby --- */}
+                        <h2 id="create-post-modal-title" className="text-xl font-bold text-foreground">Create New Post</h2>
                         <button
                             aria-expanded={showGuidelines}
                             onClick={() => setShowGuidelines((s) => !s)}
@@ -221,8 +246,9 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreateModalP
                             <HelpCircle size={16} />
                         </button>
                     </div>
-                    <button
+                    <button 
                         onClick={handleClose}
+                        aria-label="Close modal"
                         className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors text-foreground/70 hover:text-foreground"
                     >
                         <X size={20} />
@@ -368,8 +394,9 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreateModalP
                             <div className="w-full max-h-48 rounded-2xl overflow-hidden border border-white/10 shadow-lg">
                                 <Image src={imagePreview} alt="Preview" width={800} height={400} unoptimized className="w-full h-full object-cover" />
                             </div>
-                            <button
-                                onClick={() => { setImageFile(null); setImagePreview(null); }}
+                            <button 
+                                onClick={() => { setImageFile(null); setImagePreview(null); }} 
+                                aria-label="Remove image"
                                 className="absolute top-3 right-3 bg-red-500/90 p-2 rounded-full text-white shadow-xl hover:bg-red-600 transition-all scale-90 group-hover:scale-100"
                             >
                                 <Trash2 size={18} />
