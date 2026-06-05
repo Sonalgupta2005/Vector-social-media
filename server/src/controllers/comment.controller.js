@@ -5,12 +5,11 @@ import User from "../models/user.model.js";
 import Follow from "../models/follow.model.js";
 import Notification from "../models/notification.model.js";
 import { getIO } from "../socket/socket.js";
-
+import asyncHandler from "../utils/asyncHandler.js";
 // Hard upper bound on comments returned per request.
 const MAX_LIMIT = 50;
 
-export const addComment = async (req, res) => {
-    try {
+export const addComment = asyncHandler(async (req, res) => {
         const { postId } = req.params;
         const { content } = req.body;
         if (!content?.trim()) {
@@ -85,13 +84,10 @@ export const addComment = async (req, res) => {
             });
         }
         return res.status(201).json(populated);
-    } catch (error) {
-        return res.status(500).json({ message: error.message });
-    }
-};
+   
+});
 
-export const getPostComments = async (req, res) => {
-    try {
+export const getPostComments = asyncHandler(async (req, res) => {
         const { postId } = req.params;
 
         const post = await Post.findById(postId).select("author");
@@ -153,15 +149,11 @@ export const getPostComments = async (req, res) => {
         const nextCursor = hasMore ? comments[comments.length - 1]._id : null;
 
         res.json({ comments, nextCursor, hasMore });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
+});
 
-export const deleteComment = async (req, res) => {
-    try {
-        const comment = await Comment.findById(req.params.commentId);
-        if (!comment) {
+export const deleteComment = asyncHandler(async (req, res) => {
+    const comment = await Comment.findById(req.params.commentId);
+    if (!comment) {
             return res.status(404).json({
                 message: "Comment not found"
             });
@@ -177,7 +169,4 @@ export const deleteComment = async (req, res) => {
         res.json({
             success: true
         });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
+});

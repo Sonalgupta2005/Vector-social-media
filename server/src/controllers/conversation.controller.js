@@ -2,9 +2,8 @@ import Conversation from "../models/conversation.model.js";
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import { getIO } from "../socket/socket.js";
-
-export const createConversation = async (req, res) => {
-    try {
+import asyncHandler from "../utils/asyncHandler.js";
+export const createConversation = asyncHandler(async (req, res) => {
         const { receiverId } = req.body;
         const senderId = req.user._id;
 
@@ -60,15 +59,9 @@ export const createConversation = async (req, res) => {
             }
         }
         res.json(convo);
-    } catch (err) {
-        res.status(500).json({
-            message: err.message
-        });
-    }
-};
+});
 
-export const getConversation = async (req, res) => {
-    try {
+export const getConversation = asyncHandler(async (req, res) => {
         const convo = await Conversation.findOne({
             _id: req.params.conversationId,
             participants: req.user._id,
@@ -93,15 +86,9 @@ export const getConversation = async (req, res) => {
         }
 
         res.json(convo);
-    } catch (error) {
-        res.status(500).json({
-            message: error.message
-        });
-    }
-};
+});
 
-export const getUserConversations = async (req, res) => {
-  try {
+export const getUserConversations = asyncHandler(async (req, res) => {
     const userId = req.user._id;
 
     let conversations = await Conversation.aggregate([
@@ -300,15 +287,9 @@ export const getUserConversations = async (req, res) => {
 
     res.json(conversations);
 
-  } catch (error) {
-    res.status(500).json({
-      message: error.message
-    });
-  }
-};
+});
 
-export const deleteConversation = async (req, res) => {
-    try {
+export const deleteConversation = asyncHandler(async (req, res) => {
         const convo = await Conversation.findOneAndUpdate(
             {
                 _id: req.params.conversationId,
@@ -354,7 +335,5 @@ export const deleteConversation = async (req, res) => {
         }
 
         res.json({ message: "Conversation deleted successfully" });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
+
+});

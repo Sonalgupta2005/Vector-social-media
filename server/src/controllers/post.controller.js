@@ -9,7 +9,7 @@ import cloudinary from "../config/cloudinary.js";
 import { getIO } from "../socket/socket.js";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
 import { cleanupTempUpload, IMAGE_UPLOAD_LIMITS, validateImageUpload } from "../utils/imageUploadValidation.js";
-
+import asyncHandler from "../utils/asyncHandler.js";
 // Hard upper bound on result-set size for any list endpoint in this controller.
 // Prevents callers from triggering full-collection scans with deep .populate() chains.
 const MAX_LIMIT = 50;
@@ -104,8 +104,7 @@ export const createPost = async (req, res) => {
     }
 }
 
-export const getPosts = async (req, res) => {
-    try {
+export const getPosts = asyncHandler(async (req, res) => {
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
@@ -166,16 +165,11 @@ export const getPosts = async (req, res) => {
             hasMore,
             nextCursor,
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-}
+    
+});
 
-export const searchPosts = async (req, res) => {
-    try {
+export const searchPosts = asyncHandler(async (req, res) => {
+    
         const q = req.query.q?.trim();
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
@@ -242,21 +236,15 @@ export const searchPosts = async (req, res) => {
             hasMore,
             nextCursor,
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-}
+    
+});
 
-export const deletePost = async (req, res) => {
-    try {
-        const postId = req.params.id;
-        
-        if (!mongoose.Types.ObjectId.isValid(postId)) {
-            return res.status(400).json({ success: false, message: "Invalid post ID format" });
-        }
+export const deletePost = asyncHandler(async (req, res) => {
+    const postId = req.params.id;
+    
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+        return res.status(400).json({ success: false, message: "Invalid post ID format" });
+    }
 
         const userId = req.user.id;
         const post = await Post.findById(postId);
@@ -278,13 +266,8 @@ export const deletePost = async (req, res) => {
             success: true,
             message: "Post deleted successfully",
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-};
+   
+});
 
 export const updatePost = async (req, res) => {
     let newImagePublicId = null;
@@ -386,8 +369,7 @@ export const updatePost = async (req, res) => {
     }
 };
 
-export const toggleLike = async (req, res) => {
-    try {
+export const toggleLike = asyncHandler(async (req, res) => {
         const postId = req.params.id;
         const userId = req.user.id;
 
@@ -478,15 +460,12 @@ export const toggleLike = async (req, res) => {
             likesCount: updatedPost.likes.length,
             liked,
         });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+    
+});
 
-export const getPostsByUser = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
+export const getPostsByUser = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    
         if (!mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(400).json({
                 success: false,
@@ -573,18 +552,12 @@ export const getPostsByUser = async (req, res) => {
         nextCursor,
         limit,
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch user posts: " + error.message,
-        });
-    }
-};
+   
+});
 
-export const getSinglePost = async (req, res) => {
-    try {
-        const { postId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(postId)) {
+export const getSinglePost = asyncHandler(async (req, res) => {
+    const { postId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
             return res.status(400).json({ message: "Invalid post ID format" });
         }
 
@@ -637,13 +610,10 @@ export const getSinglePost = async (req, res) => {
             ? req.user.bookmarks.map(String).includes(post._id.toString())
             : false;
         res.json(postObj);
-    } catch (error) {
-        res.status(500).json({ message: "Server error: " + error.message });
-    }
-};
+   
+});
 
-export const getTopPostsOfWeek = async (req, res) => {
-    try {
+export const getTopPostsOfWeek = asyncHandler(async (req, res) => {
         const oneWeekAgo = new Date();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
         const requestedLimit = Number.parseInt(req.query.limit, 10);
@@ -733,16 +703,11 @@ export const getTopPostsOfWeek = async (req, res) => {
         success: true,
         posts: postsWithMeta,
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
+   
+});
 
-export const getTopPostsOfMonth = async (req, res) => {
-    try {
+export const getTopPostsOfMonth = asyncHandler(async (req, res) => {
+    
         const oneMonthAgo = new Date();
         oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
 
@@ -828,16 +793,11 @@ export const getTopPostsOfMonth = async (req, res) => {
         success: true,
         posts: postsWithMeta,
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
+    
+});
 
-export const incrementShare = async (req, res) => {
-    try {
+export const incrementShare = asyncHandler(async (req, res) => {
+
         const postId = req.params.id;
         const userId = req.user.id || req.user._id;
 
@@ -863,12 +823,9 @@ export const incrementShare = async (req, res) => {
             success: true,
             sharesCount: post.sharesCount,
         });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-export const toggleBookmark = async (req, res) => {
-  try {
+   
+});
+export const toggleBookmark = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id || req.user._id;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -921,15 +878,12 @@ export const toggleBookmark = async (req, res) => {
       bookmarked: !isBookmarked,
       message: isBookmarked ? "Removed from bookmarks" : "Added to bookmarks",
     });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+  
+});
 
-export const getBookmarks = async (req, res) => {
-  try {
-    const { cursor } = req.query;
-    const limit = 10;
+export const getBookmarks = asyncHandler(async (req, res) => {
+  const { cursor } = req.query;
+  const limit = 10;
     const user = await User.findById(req.user.id).select("bookmarks").lean();
     if (!user)
       return res
@@ -990,7 +944,5 @@ export const getBookmarks = async (req, res) => {
       ? pagePosts[pagePosts.length - 1]._id.toString()
       : null;
     res.json({ posts: postsWithMeta, nextCursor });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+ 
+});

@@ -10,6 +10,7 @@ import Comment from "../models/comment.model.js";
 import { getIO } from "../socket/socket.js";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
 import { cleanupTempUpload, IMAGE_UPLOAD_LIMITS, validateImageUpload } from "../utils/imageUploadValidation.js";
+import asyncHandler from "../utils/asyncHandler.js";
 
 export const uploadAvatar = async (req, res) => {
     let avatarPublicId = null;
@@ -64,9 +65,8 @@ export const uploadAvatar = async (req, res) => {
     }
 };
 
-export const updateProfile = async (req, res) => {
-    try {
-        const userId = req.user.id;
+export const updateProfile = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
         const { username, name, surname, phoneNumber, bio, description, isPrivate } = req.body;
         const user = await User.findById(userId);
         if (!user) {
@@ -191,13 +191,7 @@ export const updateProfile = async (req, res) => {
             },
             message: "Profile updated successfully!"
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-};
+});
 
 export const toggleFollowUser = async (req, res) => {
     try {
@@ -291,25 +285,17 @@ export const toggleFollowUser = async (req, res) => {
     }
 };
 
-export const getFollowRequests = async (req, res) => {
-    try {
+export const getFollowRequests = asyncHandler(async (req, res) => {
         const requests = await Follow.find({ following: req.user.id, status: "pending" })
             .populate("follower", "name username avatar");
         res.status(200).json(requests.map(r => r.follower));
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-};
+});
 
-export const getSentFollowRequests = async (req, res) => {
-    try {
+export const getSentFollowRequests = asyncHandler(async (req, res) => {
         const requests = await Follow.find({ follower: req.user.id, status: "pending" })
             .populate("following", "name username avatar bio");
         res.status(200).json(requests.map(r => r.following));
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-};
+});
 
 
 export const acceptFollowRequest = async (req, res) => {
@@ -417,10 +403,9 @@ export const acceptFollowRequest = async (req, res) => {
     }
 };
 
-export const rejectFollowRequest = async (req, res) => {
-    try {
-        const currentUserId = req.user.id;
-        const requesterId = req.params.id;
+export const rejectFollowRequest = asyncHandler(async (req, res) => {
+    const currentUserId = req.user.id;
+    const requesterId = req.params.id;
 
         const followRequest = await Follow.findOne({ follower: requesterId, following: currentUserId, status: "pending" });
         if (!followRequest) {
@@ -431,14 +416,10 @@ export const rejectFollowRequest = async (req, res) => {
         await Notification.deleteOne({ recipient: currentUserId, sender: requesterId, type: "follow_request" });
 
         res.json({ success: true, message: "Follow request rejected" });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-};
+});
 
-export const getUserProfile = async (req, res) => {
-    try {
-        const { username } = req.params;
+export const getUserProfile = asyncHandler(async (req, res) => {
+    const { username } = req.params;
 
         // Single query
         const user = await User.findOne({ username })
@@ -520,13 +501,9 @@ export const getUserProfile = async (req, res) => {
         delete response.blockedUsers;
 
         res.json(response);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
+});
 
-export const getFollowers = async (req, res) => {
-    try {
+export const getFollowers = asyncHandler(async (req, res) => {
         const targetUser = await User.findById(req.params.id).select("isPrivate blockedUsers");
         if (!targetUser) {
             return res.status(404).json({ message: "User not found" });
@@ -583,13 +560,9 @@ export const getFollowers = async (req, res) => {
             nextCursor,
             hasMore
         });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-};
+});
 
-export const getFollowing = async (req, res) => {
-    try {
+export const getFollowing = asyncHandler(async (req, res) => {
         const targetUser = await User.findById(req.params.id).select("isPrivate blockedUsers");
         if (!targetUser) {
             return res.status(404).json({ message: "User not found" });
@@ -646,13 +619,9 @@ export const getFollowing = async (req, res) => {
             nextCursor,
             hasMore
         });
-    } catch (err) {
-        res.status(500).json({ message: err.message });
-    }
-};
+});
 
-export const getAllUsers = async (req, res) => {
-    try {
+export const getAllUsers = asyncHandler(async (req, res) => {
         if (!req.user) {
             return res.status(401).json({ success: false, message: "Unauthorized" });
         }
@@ -670,16 +639,10 @@ export const getAllUsers = async (req, res) => {
             success: true,
             users
         });
-    } catch {
-        res.status(500).json({
-            success: false,
-            message: "Failed to fetch users"
-        });
-    }
-};
+   
+});
 
-export const getSuggestedUsers = async (req, res) => {
-    try {
+export const getSuggestedUsers = asyncHandler(async (req, res) => {
         const currentUserId = req.user._id || req.user.id;
         
         const followings = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
@@ -718,17 +681,9 @@ export const getSuggestedUsers = async (req, res) => {
             success: true,
             users
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "Failed to fetch suggested users",
-            error: error.message
-        });
-    }
-};
+});
 
-export const searchUsers = async (req, res) => {
-    try {
+export const searchUsers = asyncHandler(async (req, res) => {
         const { query, cursor } = req.query;
 
         if (!query) {
@@ -806,14 +761,7 @@ export const searchUsers = async (req, res) => {
             nextCursor,
             hasNextPage,
         });
-
-    } catch {
-        res.status(500).json({
-            message: "Search failed"
-        });
-    }
-
-};
+});
 
 export const blockUser = async (req, res) => {
     const currentUserId = req.user.id;
@@ -1030,8 +978,7 @@ export const blockUser = async (req, res) => {
     }
 };
 
-export const unblockUser = async (req, res) => {
-    try {
+export const unblockUser = asyncHandler(async (req, res) => {
         const currentUserId = req.user.id;
         const targetUserId = req.params.id;
 
@@ -1065,11 +1012,5 @@ export const unblockUser = async (req, res) => {
             success: true,
             message: "User unblocked successfully"
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
+});
 

@@ -4,12 +4,12 @@ import Notification from "../models/notification.model.js";
 import User from "../models/user.model.js";
 import { getIO } from "../socket/socket.js";
 import { sendMessageSchema } from "../validators/message.validator.js";
+import asyncHandler from "../utils/asyncHandler.js";
 
 // Hard upper bound on messages returned per page.
 const MAX_LIMIT = 100;
 
-export const getMessages = async (req, res) => {
-  try {
+export const getMessages = asyncHandler(async (req, res) => {
     const { conversationId } = req.params;
 
     // Verify the requesting user is a participant in this conversation
@@ -68,13 +68,9 @@ export const getMessages = async (req, res) => {
 
     res.json({ messages: messages.reverse(), hasMore: messages.length === limit });
 
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+});
 
-export const sendMessage = async (req, res) => {
-  try {
+export const sendMessage = asyncHandler(async (req, res) => {
 
     const parsed = sendMessageSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -175,14 +171,10 @@ export const sendMessage = async (req, res) => {
 
     res.json(populated);
 
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+});
 
-export const getUnreadCount = async (req, res) => {
-  try {
-    const { conversationId } = req.params;
+export const getUnreadCount = asyncHandler(async (req, res) => {
+  const { conversationId } = req.params;
 
     // Verify user is a participant in this conversation
     const conversation = await Conversation.findOne({
@@ -202,14 +194,10 @@ export const getUnreadCount = async (req, res) => {
     });
 
     res.json({ unreadCount });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+});
 
-export const markConversationAsRead = async (req, res) => {
-  try {
-    const { conversationId } = req.params;
+export const markConversationAsRead = asyncHandler(async (req, res) => {
+  const { conversationId } = req.params;
 
     // Verify user is a participant in this conversation
     const conversation = await Conversation.findOne({
@@ -243,15 +231,11 @@ export const markConversationAsRead = async (req, res) => {
     }
 
     res.json({ message: "Messages marked as read" });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+  
+});
 
-export const deleteMessage = async (req, res) => {
-  try {
-
-    const message = await Message.findById(req.params.messageId);
+export const deleteMessage = asyncHandler(async (req, res) => {
+  const message = await Message.findById(req.params.messageId);
 
     if (!message) {
       return res.status(404).json({
@@ -294,9 +278,4 @@ export const deleteMessage = async (req, res) => {
       message: "Message deleted successfully"
     });
 
-  } catch (error) {
-    res.status(500).json({
-      message: error.message
-    });
-  }
-};
+});
