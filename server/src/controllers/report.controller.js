@@ -4,7 +4,7 @@ import Report from "../models/report.model.js";
 import Notification from "../models/notification.model.js";
 import { removePostById } from "./post.controller.js";
 import { getIO } from "../socket/socket.js";
-
+import asyncHandler from "../utils/asyncHandler.js";
 const REPORT_THRESHOLD = 5;
 
 const VALID_REASONS = ["spam", "harassment", "hate_speech", "violence", "nudity", "misinformation", "other"];
@@ -29,10 +29,9 @@ const validateReportInput = (targetId, reason, details) => {
   return null;
 };
 
-export const createPostReport = async (req, res) => {
-  try {
-    const { postId, reason, details = "" } = req.body;
-    const reporterId = req.user.id;
+export const createPostReport = asyncHandler(async (req, res) => {
+  const { postId, reason, details = "" } = req.body;
+  const reporterId = req.user.id;
 
     const validationError = validateReportInput(postId, reason, details);
     if (validationError) {
@@ -112,15 +111,11 @@ export const createPostReport = async (req, res) => {
       message: "Report submitted",
       removed: false,
     });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
+});
 
-export const createCommentReport = async (req, res) => {
-  try {
-    const { commentId, reason, details = "" } = req.body;
-    const reporterId = req.user.id;
+export const createCommentReport = asyncHandler(async (req, res) => {
+  const { commentId, reason, details = "" } = req.body;
+  const reporterId = req.user.id;
 
     const validationError = validateReportInput(commentId, reason, details);
     if (validationError) {
@@ -205,7 +200,4 @@ export const createCommentReport = async (req, res) => {
       message: "Report submitted",
       removed: false,
     });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
+});

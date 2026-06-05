@@ -9,7 +9,7 @@ import cloudinary from "../config/cloudinary.js";
 import { getIO } from "../socket/socket.js";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
 import { cleanupTempUpload, IMAGE_UPLOAD_LIMITS, validateImageUpload } from "../utils/imageUploadValidation.js";
-
+import asyncHandler from "../utils/asyncHandler.js";
 // Hard upper bound on result-set size for any list endpoint in this controller.
 // Prevents callers from triggering full-collection scans with deep .populate() chains.
 const MAX_LIMIT = 50;
@@ -266,7 +266,7 @@ export const getPosts = async (req, res) => {
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
-}
+};
 
 export const searchPosts = async (req, res) => {
     try {
@@ -311,13 +311,12 @@ export const searchPosts = async (req, res) => {
     }
 }
 
-export const deletePost = async (req, res) => {
-    try {
-        const postId = req.params.id;
-        
-        if (!mongoose.Types.ObjectId.isValid(postId)) {
-            return res.status(400).json({ success: false, message: "Invalid post ID format" });
-        }
+export const deletePost = asyncHandler(async (req, res) => {
+    const postId = req.params.id;
+    
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+        return res.status(400).json({ success: false, message: "Invalid post ID format" });
+    }
 
         const userId = req.user.id;
         const post = await Post.findById(postId);
@@ -339,13 +338,8 @@ export const deletePost = async (req, res) => {
             success: true,
             message: "Post deleted successfully",
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-};
+   
+});
 
 export const updatePost = async (req, res) => {
     let newImagePublicId = null;
@@ -447,8 +441,7 @@ export const updatePost = async (req, res) => {
     }
 };
 
-export const toggleLike = async (req, res) => {
-    try {
+export const toggleLike = asyncHandler(async (req, res) => {
         const postId = req.params.id;
         const userId = req.user.id;
 
@@ -539,15 +532,12 @@ export const toggleLike = async (req, res) => {
             likesCount: updatedPost.likes.length,
             liked,
         });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+    
+});
 
-export const getPostsByUser = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
+export const getPostsByUser = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    
         if (!mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(400).json({
                 success: false,
@@ -634,18 +624,12 @@ export const getPostsByUser = async (req, res) => {
         nextCursor,
         limit,
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch user posts: " + error.message,
-        });
-    }
-};
+   
+});
 
-export const getSinglePost = async (req, res) => {
-    try {
-        const { postId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(postId)) {
+export const getSinglePost = asyncHandler(async (req, res) => {
+    const { postId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
             return res.status(400).json({ message: "Invalid post ID format" });
         }
 
@@ -698,17 +682,15 @@ export const getSinglePost = async (req, res) => {
             ? req.user.bookmarks.map(String).includes(post._id.toString())
             : false;
         res.json(postObj);
-    } catch (error) {
-        res.status(500).json({ message: "Server error: " + error.message });
-    }
-};
+   
+});
 
 export const getTopPostsOfWeek = getTopPosts(7, MAX_LIMIT);
 
 export const getTopPostsOfMonth = getTopPosts(30, 3);
 
-export const incrementShare = async (req, res) => {
-    try {
+export const incrementShare = asyncHandler(async (req, res) => {
+
         const postId = req.params.id;
         const userId = req.user.id || req.user._id;
 
@@ -716,30 +698,50 @@ export const incrementShare = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid post ID format" });
         }
 
-        const post = await Post.findOneAndUpdate(
+        const post = await Post.findById(postId).select("author authorIsPrivate sharedBy sharesCount");
+        if (!post) {
+            return res.status(404).json({ success: false, message: "Post not found" });
+        }
+
+        if (post.author.toString() !== userId.toString()) {
+            const [authorUser, currentUser] = await Promise.all([
+                User.findById(post.author).select("blockedUsers"),
+                User.findById(userId).select("blockedUsers"),
+            ]);
+            const isBlocked = currentUser?.blockedUsers?.some(
+                id => id.toString() === post.author.toString()
+            ) || authorUser?.blockedUsers?.some(
+                id => id.toString() === userId.toString()
+            );
+            if (isBlocked) {
+                return res.status(403).json({ success: false, message: "Action forbidden due to block status" });
+            }
+
+            if (post.authorIsPrivate) {
+                const isFollower = await Follow.exists({ follower: userId, following: post.author, status: "accepted" });
+                if (!isFollower) {
+                    return res.status(403).json({ success: false, message: "This account is private. Follow to interact with their posts." });
+                }
+            }
+        }
+
+        const updatedPost = await Post.findOneAndUpdate(
             { _id: postId, sharedBy: { $ne: userId } },
             { $addToSet: { sharedBy: userId }, $inc: { sharesCount: 1 } },
             { new: true }
         );
 
-        if (!post) {
-            const exists = await Post.exists({ _id: postId });
-            if (!exists) {
-                return res.status(404).json({ success: false, message: "Post not found" });
-            }
+        if (!updatedPost) {
             return res.status(409).json({ success: false, message: "Already shared" });
         }
 
         res.json({
             success: true,
-            sharesCount: post.sharesCount,
+            sharesCount: updatedPost.sharesCount,
         });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-export const toggleBookmark = async (req, res) => {
-  try {
+   
+});
+export const toggleBookmark = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id || req.user._id;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -792,43 +794,40 @@ export const toggleBookmark = async (req, res) => {
       bookmarked: !isBookmarked,
       message: isBookmarked ? "Removed from bookmarks" : "Added to bookmarks",
     });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+  
+});
 
-export const getBookmarks = async (req, res) => {
-  try {
-    const { cursor } = req.query;
-    const limit = 10;
-    const user = await User.findById(req.user.id).select("bookmarks");
+export const getBookmarks = asyncHandler(async (req, res) => {
+  const { cursor } = req.query;
+  const limit = 10;
+    const user = await User.findById(req.user.id).select("bookmarks").lean();
     if (!user)
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
-    let bookmarkIds = [...user.bookmarks].reverse();
+    if (!user.bookmarks.length) {
+      return res.json({ posts: [], nextCursor: null });
+    }
+    const bookmarkIds = user.bookmarks;
     if (cursor) {
       if (!mongoose.Types.ObjectId.isValid(cursor)) {
         return res
           .status(400)
           .json({ success: false, message: "Invalid cursor" });
       }
-      const idx = bookmarkIds.findIndex((id) => id.toString() === cursor);
-      if (idx === -1)
-        return res
-          .status(400)
-          .json({ success: false, message: "Cursor not found" });
-      bookmarkIds = bookmarkIds.slice(idx + 1);
     }
-    bookmarkIds = bookmarkIds.slice(0, limit);
-    const posts = await Post.find({ _id: { $in: bookmarkIds } })
+    const filter = { _id: { $in: bookmarkIds } };
+    if (cursor) {
+      filter._id.$lt = new mongoose.Types.ObjectId(cursor);
+    }
+    const posts = await Post.find(filter)
+      .sort({ _id: -1 })
+      .limit(limit + 1)
       .populate("author", "username name surname avatar")
       .populate("likes", "username name avatar _id")
       .lean();
-    const postMap = new Map(posts.map((p) => [p._id.toString(), p]));
-    const orderedPosts = bookmarkIds
-      .map((id) => postMap.get(id.toString()))
-      .filter(Boolean);
+    const hasNextPage = posts.length > limit;
+    const pagePosts = hasNextPage ? posts.slice(0, limit) : posts;
 
     const currentUserId = req.user._id?.toString() || req.user.id?.toString();
     const blockedIds = new Set((req.user.blockedUsers || []).map(id => id.toString()));
@@ -838,14 +837,14 @@ export const getBookmarks = async (req, res) => {
     const followingDocs = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
     const followingIds = new Set(followingDocs.map(f => f.following.toString()));
 
-    const authorIds = [...new Set(orderedPosts.map(p => p.author?._id?.toString()).filter(Boolean))];
+    const authorIds = [...new Set(pagePosts.map(p => p.author?._id?.toString()).filter(Boolean))];
     const privateNotFollowed = await User.find({
       _id: { $in: authorIds, $nin: [...followingIds, currentUserId] },
       isPrivate: true,
     }).select("_id").lean();
     const privateNotFollowedIds = new Set(privateNotFollowed.map(u => u._id.toString()));
 
-    const filteredPosts = orderedPosts.filter(p => {
+    const filteredPosts = pagePosts.filter(p => {
       const authorId = p.author?._id?.toString();
       if (!authorId) return false;
       if (blockedIds.has(authorId)) return false;
@@ -857,12 +856,9 @@ export const getBookmarks = async (req, res) => {
       ...p,
       isBookmarked: true,
     }));
-    const nextCursor =
-      bookmarkIds.length === limit
-        ? bookmarkIds[bookmarkIds.length - 1].toString()
-        : null;
+    const nextCursor = hasNextPage
+      ? pagePosts[pagePosts.length - 1]._id.toString()
+      : null;
     res.json({ posts: postsWithMeta, nextCursor });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+ 
+});

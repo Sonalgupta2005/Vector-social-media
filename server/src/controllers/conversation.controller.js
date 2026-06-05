@@ -2,9 +2,8 @@ import Conversation from "../models/conversation.model.js";
 import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import { getIO } from "../socket/socket.js";
-
-export const createConversation = async (req, res) => {
-    try {
+import asyncHandler from "../utils/asyncHandler.js";
+export const createConversation = asyncHandler(async (req, res) => {
         const { receiverId } = req.body;
         const senderId = req.user._id;
 
@@ -60,15 +59,9 @@ export const createConversation = async (req, res) => {
             }
         }
         res.json(convo);
-    } catch (err) {
-        res.status(500).json({
-            message: err.message
-        });
-    }
-};
+});
 
-export const getConversation = async (req, res) => {
-    try {
+export const getConversation = asyncHandler(async (req, res) => {
         const convo = await Conversation.findOne({
             _id: req.params.conversationId,
             participants: req.user._id,
@@ -93,15 +86,9 @@ export const getConversation = async (req, res) => {
         }
 
         res.json(convo);
-    } catch (error) {
-        res.status(500).json({
-            message: error.message
-        });
-    }
-};
+});
 
-export const getUserConversations = async (req, res) => {
-  try {
+export const getUserConversations = asyncHandler(async (req, res) => {
     const userId = req.user._id;
 
     let conversations = await Conversation.aggregate([
@@ -300,61 +287,97 @@ export const getUserConversations = async (req, res) => {
 
     res.json(conversations);
 
-  } catch (error) {
-    res.status(500).json({
-      message: error.message
-    });
-  }
-};
+});
 
-export const deleteConversation = async (req, res) => {
-    try {
-        const convo = await Conversation.findOneAndUpdate(
-            {
-                _id: req.params.conversationId,
-                participants: req.user._id,
-                deletedBy: { $ne: req.user._id },
-            },
-            { $addToSet: { deletedBy: req.user._id } },
-            { new: true }
+export const deleteConversation = asyncHandler(async (req, res) => {
+
+    const existingConvo = await Conversation.findOne({
+        _id: req.params.conversationId,
+        participants: req.user._id,
+    });
+
+    if (existingConvo) {
+        const otherParticipant = existingConvo.participants.find(
+            p => p.toString() !== req.user._id.toString()
         );
 
-        if (!convo) {
-            const existingConvo = await Conversation.findOne({
-                _id: req.params.conversationId,
-                participants: req.user._id,
-            });
-            if (!existingConvo) {
-                return res.status(404).json({ message: "Conversation not found or unauthorized" });
+        if (otherParticipant) {
+            const otherUser = await User.findById(otherParticipant).select("blockedUsers");
+
+            const isBlocked =
+                req.user.blockedUsers?.some(
+                    id => id.toString() === otherParticipant.toString()
+                ) ||
+                otherUser?.blockedUsers?.some(
+                    id => id.toString() === req.user._id.toString()
+                );
+
+            if (isBlocked) {
+                return res.status(403).json({
+                    message: "Action forbidden due to block status"
+                });
             }
-            return res.status(400).json({ message: "Conversation already deleted" });
+        }
+    }
+
+    const convo = await Conversation.findOneAndUpdate(
+        {
+            _id: req.params.conversationId,
+            participants: req.user._id,
+            deletedBy: { $ne: req.user._id },
+        },
+        { $addToSet: { deletedBy: req.user._id } },
+        { new: true }
+    );
+
+    if (!convo) {
+        const existingConvo = await Conversation.findOne({
+            _id: req.params.conversationId,
+            participants: req.user._id,
+        });
+
+        if (!existingConvo) {
+            return res.status(404).json({
+                message: "Conversation not found or unauthorized"
+            });
         }
 
-        const allDeleted = convo.participants.every((participantId) =>
-            convo.deletedBy.some((id) => id.toString() === participantId.toString())
+        return res.status(400).json({
+            message: "Conversation already deleted"
+        });
+    }
+
+    const allDeleted = convo.participants.every((participantId) =>
+        convo.deletedBy.some(
+            (id) => id.toString() === participantId.toString()
+        )
+    );
+
+    if (allDeleted) {
+        await Message.deleteMany({ conversation: convo._id });
+        await Conversation.deleteOne({ _id: convo._id });
+
+        getIO().to(convo._id.toString()).emit("conversation:deleted", {
+            conversationId: convo._id,
+        });
+    } else {
+        const otherParticipants = convo.participants.filter(
+            (pid) => pid.toString() !== req.user._id.toString()
         );
 
-        if (allDeleted) {
-            await Message.deleteMany({ conversation: convo._id });
-            await Conversation.deleteOne({ _id: convo._id });
-
-            getIO().to(convo._id.toString()).emit("conversation:deleted", {
-                conversationId: convo._id,
-            });
-        } else {
-            const otherParticipants = convo.participants.filter(
-                (pid) => pid.toString() !== req.user._id.toString()
-            );
-            otherParticipants.forEach((pid) => {
-                getIO().to(pid.toString()).emit("conversation:participant_deleted", {
+        otherParticipants.forEach((pid) => {
+            getIO().to(pid.toString()).emit(
+                "conversation:participant_deleted",
+                {
                     conversationId: convo._id,
                     deletedBy: req.user._id,
-                });
-            });
-        }
-
-        res.json({ message: "Conversation deleted successfully" });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+                }
+            );
+        });
     }
-};
+
+    res.json({
+        message: "Conversation deleted successfully"
+    });
+
+});
