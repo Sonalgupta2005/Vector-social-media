@@ -230,8 +230,7 @@ export const createPost = async (req, res) => {
     }
 }
 
-export const getPosts = async (req, res) => {
-    try {
+export const getPosts = asyncHandler(async (req, res) => {
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
@@ -261,15 +260,37 @@ export const getPosts = async (req, res) => {
                 .populate("author", "username name surname avatar")
                 .populate(getLikesPopulate([]));
 
-            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
-        }
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+        const posts = await Post.find(filter)
+            .sort({ _id: -1 })
+            .limit(limit)
+            .populate("author", "username name surname avatar")
+            .populate(
+                excludeUserIds.length
+                    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
+                    : { path: "likes", select: "username name avatar _id" }
+            );
 
-export const searchPosts = async (req, res) => {
-    try {
+        const hasMore = posts.length === limit;
+        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
+
+        const userBookmarkSet = req.user?.bookmarks
+            ? new Set(req.user.bookmarks.map(String))
+            : new Set();
+        const postsWithMeta = posts.map((p) => ({
+        ...p.toObject(),
+        isBookmarked: userBookmarkSet.has(p._id.toString()),
+        }));
+        res.status(200).json({
+            posts: postsWithMeta,
+            limit,
+            hasMore,
+            nextCursor,
+        });
+    
+});
+
+export const searchPosts = asyncHandler(async (req, res) => {
+    
         const q = req.query.q?.trim();
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
@@ -304,12 +325,21 @@ export const searchPosts = async (req, res) => {
                 .populate("author", "username name surname avatar")
                 .populate(getLikesPopulate([]));
 
-            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
-        }
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-}
+        const userBookmarkSet = req.user?.bookmarks
+            ? new Set(req.user.bookmarks.map(String))
+            : new Set();
+        const postsWithMeta = posts.map((p) => ({
+        ...p.toObject(),
+        isBookmarked: userBookmarkSet.has(p._id.toString()),
+        }));
+        res.status(200).json({
+            posts: postsWithMeta,
+            limit,
+            hasMore,
+            nextCursor,
+        });
+    
+});
 
 export const deletePost = asyncHandler(async (req, res) => {
     const postId = req.params.id;
@@ -689,12 +719,185 @@ export const getTopPostsOfWeek = getTopPosts(7, MAX_LIMIT);
 
 export const getTopPostsOfMonth = getTopPosts(30, 3);
 
+export const getTopPostsOfWeek = asyncHandler(async (req, res) => {
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        const requestedLimit = Number.parseInt(req.query.limit, 10);
+        const limit = Math.min(
+            Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : 10,
+            MAX_LIMIT
+        );
+        let filter = { createdAt: { $gte: oneWeekAgo } };
+        let excludeUserIds = [];
+
 export const incrementShare = asyncHandler(async (req, res) => {
         const postId = req.params.id;
         const userId = req.user.id || req.user._id;
 
         if (!mongoose.Types.ObjectId.isValid(postId)) {
             return res.status(400).json({ success: false, message: "Invalid post ID format" });
+        }
+
+        const posts = await Post.aggregate([
+            { $match: filter },
+            {
+                $addFields: {
+                    likes: { $setDifference: ["$likes", excludeUserIds] },
+                    likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
+                    commentsCount: { $ifNull: ["$commentsCount", 0] },
+                    sharesCount: { $size: { $setDifference: [{ $ifNull: ["$sharedBy", []] }, excludeUserIds] } },
+                },
+            },
+            {
+                $addFields: {
+                    engagementScore: {
+                        $add: [
+                            { $multiply: ["$likesCount", 4] },
+                            { $multiply: ["$commentsCount", 3] },
+                            { $multiply: ["$sharesCount", 2] },
+                        ],
+                    },
+                },
+            },
+            { $sort: { engagementScore: -1, createdAt: -1 } },
+            { $limit: limit },
+            { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
+            { $unwind: "$author" },
+            {
+                $project: {
+                    _id: 1,
+                    content: 1,
+                    image: 1,
+                    intent: 1,
+                    likes: 1,
+                    commentsCount: 1,
+                    sharesCount: 1,
+                    likesCount: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    "author._id": 1,
+                    "author.username": 1,
+                    "author.name": 1,
+                    "author.surname": 1,
+                    "author.avatar": 1,
+                },
+            }
+        ]);
+        const userBookmarkSet = req.user?.bookmarks
+            ? new Set(req.user.bookmarks.map(String))
+            : new Set();
+        const postsWithMeta = posts.map(p => ({
+        ...p,
+        isBookmarked: userBookmarkSet.has(p._id.toString()),
+        }));
+        res.status(200).json({
+        success: true,
+        posts: postsWithMeta,
+        });
+   
+});
+
+export const getTopPostsOfMonth = asyncHandler(async (req, res) => {
+    
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+
+        let filter = { createdAt: { $gte: oneMonthAgo } };
+        let excludeUserIds = [];
+
+        if (req.user) {
+            const currentUserId = req.user._id || req.user.id;
+            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
+            const blockerIds = blockers.map((user) => user._id);
+            const blockedIds = req.user.blockedUsers || [];
+            excludeUserIds = [...blockedIds, ...blockerIds];
+
+            if (excludeUserIds.length > 0) {
+                filter = {
+                    ...filter,
+                    author: { $nin: excludeUserIds },
+                };
+            }
+            const followingDocsMonth = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
+            const followingIdsMonth = followingDocsMonth.map(f => f.following);
+            filter.$or = [
+                { authorIsPrivate: { $ne: true } },
+                { author: { $in: [...followingIdsMonth, currentUserId] } }
+            ];
+        } else {
+            filter.authorIsPrivate = { $ne: true };
+        }
+
+        const posts = await Post.aggregate([
+            { $match: filter },
+            {
+                $addFields: {
+                    likes: { $setDifference: ["$likes", excludeUserIds] },
+                    likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
+                    commentsCount: { $ifNull: ["$commentsCount", 0] },
+                    sharesCount: { $size: { $setDifference: [{ $ifNull: ["$sharedBy", []] }, excludeUserIds] } },
+                },
+            },
+            {
+                $addFields: {
+                    engagementScore: {
+                        $add: [
+                            { $multiply: ["$likesCount", 4] },
+                            { $multiply: ["$commentsCount", 3] },
+                            { $multiply: ["$sharesCount", 2] },
+                        ],
+                    },
+                },
+            },
+            { $sort: { engagementScore: -1, createdAt: -1 } },
+            { $limit: 3 },
+            { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
+            { $unwind: "$author" },
+            {
+                $project: {
+                    _id: 1,
+                    content: 1,
+                    image: 1,
+                    intent: 1,
+                    likes: 1,
+                    commentsCount: 1,
+                    sharesCount: 1,
+                    likesCount: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    "author._id": 1,
+                    "author.username": 1,
+                    "author.name": 1,
+                    "author.surname": 1,
+                    "author.avatar": 1,
+                },
+            },
+        ]);
+        const userBookmarkSet = req.user?.bookmarks
+            ? new Set(req.user.bookmarks.map(String))
+            : new Set();
+        const postsWithMeta = posts.map(p => ({
+        ...p,
+        isBookmarked: userBookmarkSet.has(p._id.toString()),
+        }));
+        res.status(200).json({
+        success: true,
+        posts: postsWithMeta,
+        });
+    
+});
+
+export const incrementShare = asyncHandler(async (req, res) => {
+
+        const postId = req.params.id;
+        const userId = req.user.id || req.user._id;
+
+            if (post.authorIsPrivate) {
+                const isFollower = await Follow.exists({ follower: userId, following: post.author, status: "accepted" });
+                if (!isFollower) {
+                    return res.status(403).json({ success: false, message: "This account is private. Follow to interact with their posts." });
+                }
+            }
         }
 
         const post = await Post.findById(postId).select("author authorIsPrivate sharedBy sharesCount");
