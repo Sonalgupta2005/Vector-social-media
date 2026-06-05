@@ -151,12 +151,24 @@ export default function PostCard({ post, setPost }: PostCardProps) {
                 );
             }
 
-            // ✅ API call
-            await axios.put(
+            // ✅ API call — read response to reconcile optimistic state
+            const res = await axios.put<{ liked: boolean; likesCount: number }>(
                 `${BACKEND_URL}/api/posts/${post._id}/like`,
                 {},
                 { withCredentials: true }
             );
+            const { liked: serverLiked } = res.data;
+            if (serverLiked !== !isLiked) {
+                const correctedLikes = serverLiked
+                    ? getUniqueLikes([...uniqueLikes, currentUserLike ?? userData.id])
+                    : uniqueLikes.filter((like) => getLikeUserId(like) !== userData.id);
+                setLocalLikes(correctedLikes);
+                if (setPost) {
+                    setPost(prev => prev ? { ...prev, likes: correctedLikes } : prev);
+                } else {
+                    setPosts(prev => prev.map(p => p._id === post._id ? { ...p, likes: correctedLikes } : p));
+                }
+            }
         } catch (error) {
             // 🚨 revert optimistic update
             setLocalLikes(previousLikes);
