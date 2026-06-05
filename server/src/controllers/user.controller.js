@@ -11,6 +11,8 @@ import { getIO } from "../socket/socket.js";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
 import { cleanupTempUpload, IMAGE_UPLOAD_LIMITS, validateImageUpload } from "../utils/imageUploadValidation.js";
 
+const MAX_LIMIT = 50;
+
 export const uploadAvatar = async (req, res) => {
     let avatarPublicId = null;
     try {
@@ -559,7 +561,7 @@ export const getFollowers = async (req, res) => {
         }
 
         const cursor = req.query.cursor || null;
-        const limit = parseInt(req.query.limit) || 20;
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), MAX_LIMIT);
 
         let filter = { following: req.params.id, status: "accepted" };
         if (cursor) {
@@ -622,7 +624,7 @@ export const getFollowing = async (req, res) => {
         }
 
         const cursor = req.query.cursor || null;
-        const limit = parseInt(req.query.limit) || 20;
+        const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), MAX_LIMIT);
 
         let filter = { follower: req.params.id, status: "accepted" };
         if (cursor) {
