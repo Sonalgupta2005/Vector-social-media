@@ -67,15 +67,11 @@ export default function Sidebar() {
 
   const fetchUnreadMessageCount = useCallback(async () => {
     try {
-      const response = await axios.get<
-        { unreadCount: number }[]
-      >(`${BACKEND_URL}/api/conversation`, 
-        { withCredentials: true, });
-      const conversations = Array.isArray(response.data) ? response.data : [];
-      const unreadMessages = conversations.filter(
-        (conversation) => (conversation.unreadCount ?? 0) > 0
-      ).length;
-      setUnreadMessageCount(unreadMessages);
+      const { data } = await axios.get<{ unreadCount: number }>(
+        `${BACKEND_URL}/api/conversation/unread-count`,
+        { withCredentials: true }
+      );
+      setUnreadMessageCount(data.unreadCount ?? 0);
     } catch (error) {
       console.error("Failed to fetch unread message count:", error);
     }

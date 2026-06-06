@@ -3,6 +3,34 @@ import Message from "../models/message.model.js";
 import User from "../models/user.model.js";
 import { getIO } from "../socket/socket.js";
 import asyncHandler from "../utils/asyncHandler.js";
+
+export const getUnreadConversationCount = asyncHandler(async (req, res) => {
+    const userId = req.user._id;
+
+    const conversationIds = await Conversation.distinct("_id", {
+        participants: userId,
+        deletedBy: { $ne: userId },
+    });
+
+    const count = await Message.aggregate([
+        {
+            $match: {
+                conversation: { $in: conversationIds },
+                sender: { $ne: userId },
+                isDeleted: false,
+                isRead: false,
+            },
+        },
+        {
+            $group: { _id: "$conversation" },
+        },
+        {
+            $count: "total",
+        },
+    ]);
+
+    res.json({ unreadCount: count[0]?.total ?? 0 });
+});
 export const createConversation = asyncHandler(async (req, res) => {
         const { receiverId } = req.body;
         const senderId = req.user._id;
