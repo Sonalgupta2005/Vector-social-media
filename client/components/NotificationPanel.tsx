@@ -267,6 +267,19 @@ export default function NotificationPanel({ search = "" }: Props) {
   }, [fetchNotifications, userData]);
 
   useEffect(() => {
+    if (!userData) return;
+
+    const handleNotificationRemoved = (data: { notificationId: string }) => {
+      setNotifications((prev) => prev.filter((n) => n._id !== data.notificationId));
+    };
+
+    socket.on("notification:removed", handleNotificationRemoved);
+    return () => {
+      socket.off("notification:removed", handleNotificationRemoved);
+    };
+  }, [userData]);
+
+  useEffect(() => {
     if (!notifications.some((n) => !n.isRead)) return;
 
     const timeoutId = window.setTimeout(() => {

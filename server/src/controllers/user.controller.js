@@ -223,40 +223,54 @@ export const toggleFollowUser = async (req, res) => {
             if (deleted) {
                 await User.updateOne({ _id: currentUserId }, { $inc: { followingCount: -1 } });
                 await User.updateOne({ _id: targetUserId }, { $inc: { followersCount: -1 } });
-                await Notification.deleteOne({ recipient: targetUserId, sender: currentUserId, type: "follow" });
+                const deletedNotif = await Notification.findOneAndDelete({ recipient: targetUserId, sender: currentUserId, type: "follow" });
+                if (deletedNotif) {
+                    getIO().to(targetUserId.toString()).emit("notification:removed", { notificationId: deletedNotif._id });
+                }
             }
             return res.json({ followed: false });
         } else if (existingFollow && existingFollow.status === "pending") {
             // Cancel follow request: atomically delete the pending Follow doc
             const deleted = await Follow.findOneAndDelete({ follower: currentUserId, following: targetUserId, status: "pending" });
             if (deleted) {
-                await Notification.deleteOne({ recipient: targetUserId, sender: currentUserId, type: "follow_request" });
+                const deletedNotif = await Notification.findOneAndDelete({ recipient: targetUserId, sender: currentUserId, type: "follow_request" });
+                if (deletedNotif) {
+                    getIO().to(targetUserId.toString()).emit("notification:removed", { notificationId: deletedNotif._id });
+                }
             }
             return res.json({ requested: false, message: "Follow request cancelled" });
         } else {
             // New follow: use upsert so concurrent requests collapse on the unique index
             // rather than racing to insert and surfacing a duplicate-key 500.
+            // Create the notification first, then upsert the Follow — if notification fails,
+            // the Follow upsert does not proceed, ensuring atomicity without a transaction.
             if (targetUser.isPrivate) {
+                const notification = await Notification.create({
+                    recipient: targetUser._id,
+                    sender: req.user._id,
+                    type: "follow_request",
+                });
                 const result = await Follow.findOneAndUpdate(
                     { follower: currentUserId, following: targetUserId },
                     { $setOnInsert: { follower: currentUserId, following: targetUserId, status: "pending" } },
                     { upsert: true, returnDocument: 'after', includeResultMetadata: true }
                 );
-                // Only send notification if we actually created a new document
                 if (result.lastErrorObject?.upserted) {
-                    const notification = await Notification.create({
-                        recipient: targetUser._id,
-                        sender: req.user._id,
-                        type: "follow_request",
-                    });
                     getIO().to(targetUser._id.toString()).emit("notification:new", {
                         notificationId: notification._id,
                         type: notification.type,
                     });
+                } else {
+                    await Notification.findByIdAndDelete(notification._id);
                 }
                 return res.json({ requested: true, message: "Follow request sent" });
             } else {
                 // Public account — immediate follow
+                const notification = await Notification.create({
+                    recipient: targetUser._id,
+                    sender: req.user._id,
+                    type: "follow",
+                });
                 const result = await Follow.findOneAndUpdate(
                     { follower: currentUserId, following: targetUserId },
                     { $setOnInsert: { follower: currentUserId, following: targetUserId, status: "accepted" } },
@@ -265,15 +279,12 @@ export const toggleFollowUser = async (req, res) => {
                 if (result.lastErrorObject?.upserted) {
                     await User.updateOne({ _id: currentUserId }, { $inc: { followingCount: 1 } });
                     await User.updateOne({ _id: targetUserId }, { $inc: { followersCount: 1 } });
-                    const notification = await Notification.create({
-                        recipient: targetUser._id,
-                        sender: req.user._id,
-                        type: "follow",
-                    });
                     getIO().to(targetUser._id.toString()).emit("notification:new", {
                         notificationId: notification._id,
                         type: notification.type,
                     });
+                } else {
+                    await Notification.findByIdAndDelete(notification._id);
                 }
                 return res.json({ followed: true });
             }
