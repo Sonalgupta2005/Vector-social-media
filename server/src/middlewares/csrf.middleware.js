@@ -1,12 +1,35 @@
 const getOriginAllowlist = () => {
-  const origins = [
-    "http://localhost:3000",
-    "http://vector-lac.vercel.app",
-    "https://vector-lac.vercel.app",
-  ];
+  const origins = [];
+
+  // Development environment: allow localhost with both HTTP and HTTPS
+  if (process.env.NODE_ENV !== "production") {
+    origins.push("http://localhost:3000");
+    origins.push("https://localhost:3000");
+  }
+
+  // Production environment: only allow HTTPS origins from env vars
   if (process.env.FRONTEND_URL) {
     origins.push(process.env.FRONTEND_URL);
   }
+
+  // Allow secondary frontend URLs if provided (comma-separated)
+  if (process.env.FRONTEND_URLS) {
+    const secondaryUrls = process.env.FRONTEND_URLS.split(",").map(url => url.trim());
+    origins.push(...secondaryUrls);
+  }
+
+  // Validate that production origins use HTTPS
+  if (process.env.NODE_ENV === "production") {
+    origins.forEach(origin => {
+      if (origin && origin.startsWith("http://")) {
+        console.warn(
+          `[CSRF Warning] Production environment has HTTP origin: ${origin}. ` +
+          "Only HTTPS origins are allowed in production. Please update FRONTEND_URL or FRONTEND_URLS env vars."
+        );
+      }
+    });
+  }
+
   return origins;
 };
 
