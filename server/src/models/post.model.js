@@ -51,6 +51,11 @@ const postSchema = new mongoose.Schema({
     ref: "User"
   }],
 
+  isFlaggedForReview: {
+    type: Boolean,
+    default: false,
+  },
+
 }, { timestamps: true });
 
 postSchema.index({ content: "text", intent: "text" });

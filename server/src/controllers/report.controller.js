@@ -2,7 +2,6 @@ import Post from "../models/post.model.js";
 import Comment from "../models/comment.model.js";
 import Report from "../models/report.model.js";
 import Notification from "../models/notification.model.js";
-import { removePostById } from "./post.controller.js";
 import { getIO } from "../socket/socket.js";
 import asyncHandler from "../utils/asyncHandler.js";
 const REPORT_THRESHOLD = 5;
@@ -75,19 +74,21 @@ export const createPostReport = asyncHandler(async (req, res) => {
     if (reportCount >= REPORT_THRESHOLD) {
       const authorId = post.author;
 
-      // removePostById fetches the post first and returns null when it is already gone.
-      // Using its return value as an atomic guard ensures that only the first concurrent
-      // request that reaches this branch proceeds with notification and socket emit.
-      const removed = await removePostById(postId);
-      if (!removed) {
+      // Atomically flag the post for review. The filter ensures only the first
+      // concurrent request that reaches this branch proceeds with notification.
+      const flagged = await Post.findOneAndUpdate(
+        { _id: postId, isFlaggedForReview: { $ne: true } },
+        { $set: { isFlaggedForReview: true } },
+      );
+      if (!flagged) {
         return res.status(200).json({
           success: true,
-          message: "Report submitted. Post has been removed due to multiple reports.",
-          removed: true,
+          message: "Report submitted. Post has been flagged for review.",
+          flagged: true,
         });
       }
 
-      // Notify the post author only when we were the request that performed the removal.
+      // Notify the post author only when we were the request that set the flag.
       const notification = await Notification.create({
         recipient: authorId,
         type: "post_removed_reported",
@@ -101,15 +102,15 @@ export const createPostReport = asyncHandler(async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: "Report submitted. Post has been removed due to multiple reports.",
-        removed: true,
+        message: "Report submitted. Post has been flagged for review.",
+        flagged: true,
       });
     }
 
     return res.status(201).json({
       success: true,
       message: "Report submitted",
-      removed: false,
+      flagged: false,
     });
 });
 
@@ -160,23 +161,24 @@ export const createCommentReport = asyncHandler(async (req, res) => {
       const authorId = comment.author;
       const postId = comment.post;
 
-      // findByIdAndDelete returns null when the comment is already gone (concurrent removal).
-      // Only the request that actually deletes the comment proceeds with cleanup and notification.
-      const deletedComment = await Comment.findByIdAndDelete(commentId);
-      if (!deletedComment) {
+      // Atomically flag the comment for review. The filter ensures only the first
+      // concurrent request that reaches this branch proceeds with cleanup and notification.
+      const flaggedComment = await Comment.findOneAndUpdate(
+        { _id: commentId, isFlaggedForReview: { $ne: true } },
+        { $set: { isFlaggedForReview: true } },
+      );
+      if (!flaggedComment) {
         return res.status(200).json({
           success: true,
-          message: "Report submitted. Comment has been removed due to multiple reports.",
-          removed: true,
+          message: "Report submitted. Comment has been flagged for review.",
+          flagged: true,
         });
       }
 
+      // Decrement visible comment count (gated by atomic guard above).
       await Post.findByIdAndUpdate(postId, { $inc: { commentsCount: -1 } });
 
-      // Clean up all reports for this comment
-      await Report.deleteMany({ targetType: "comment", targetId: commentId });
-
-      // Notify the comment author only when we were the request that performed the removal.
+      // Notify the comment author only when we were the request that set the flag.
       const notification = await Notification.create({
         recipient: authorId,
         type: "comment_removed_reported",
@@ -190,14 +192,14 @@ export const createCommentReport = asyncHandler(async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: "Report submitted. Comment has been removed due to multiple reports.",
-        removed: true,
+        message: "Report submitted. Comment has been flagged for review.",
+        flagged: true,
       });
     }
 
     return res.status(201).json({
       success: true,
       message: "Report submitted",
-      removed: false,
+      flagged: false,
     });
 });

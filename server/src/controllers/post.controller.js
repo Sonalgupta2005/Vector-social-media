@@ -27,6 +27,7 @@ const buildBlockExclusion = async (reqUser) => {
 };
 
 const buildVisibilityFilter = (currentUserId, excludeUserIds, filter) => {
+  filter.isFlaggedForReview = { $ne: true };
   if (excludeUserIds.length > 0) {
     filter.author = { $nin: excludeUserIds };
   }
@@ -95,6 +96,7 @@ const getTopPosts = (daysAgo, maxResults) => async (req, res) => {
       await addPrivacyOrClause(currentUserId, filter);
     } else {
       filter.authorIsPrivate = { $ne: true };
+      filter.isFlaggedForReview = { $ne: true };
     }
 
     const posts = await Post.aggregate([
@@ -251,6 +253,7 @@ export const getPosts = asyncHandler(async (req, res) => {
             sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         } else {
             filter.authorIsPrivate = { $ne: true };
+            filter.isFlaggedForReview = { $ne: true };
             const cursorErr = applyCursorPagination(filter, cursor);
             if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
 
@@ -291,6 +294,7 @@ export const searchPosts = asyncHandler(async (req, res) => {
             sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         } else {
             filter.authorIsPrivate = { $ne: true };
+            filter.isFlaggedForReview = { $ne: true };
             const cursorErr = applyCursorPagination(filter, cursor);
             if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
 
@@ -621,7 +625,7 @@ export const getPostsByUser = asyncHandler(async (req, res) => {
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
-        let postFilter = { author: userId };
+        let postFilter = { author: userId, isFlaggedForReview: { $ne: true } };
         if (cursor) {
             if (mongoose.Types.ObjectId.isValid(cursor)) {
                 postFilter._id = { $lt: cursor };
@@ -681,6 +685,10 @@ export const getSinglePost = asyncHandler(async (req, res) => {
                     : { path: "likes", select: "username name avatar _id" }
             );
         if (!post) {
+            return res.status(404).json({ message: "Post not found" });
+        }
+
+        if (post.isFlaggedForReview) {
             return res.status(404).json({ message: "Post not found" });
         }
 
@@ -847,7 +855,7 @@ export const getBookmarks = asyncHandler(async (req, res) => {
           .json({ success: false, message: "Invalid cursor" });
       }
     }
-    const filter = { _id: { $in: bookmarkIds } };
+    const filter = { _id: { $in: bookmarkIds }, isFlaggedForReview: { $ne: true } };
     if (cursor) {
       filter._id.$lt = new mongoose.Types.ObjectId(cursor);
     }

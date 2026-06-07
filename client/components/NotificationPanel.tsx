@@ -308,8 +308,8 @@ export default function NotificationPanel({ search = "" }: Props) {
     message: "message messaged",
     follow_request: "follow request requested",
     follow_request_accepted: "accepted your follow request",
-    post_removed_reported: "post removed reported",
-    comment_removed_reported: "comment removed reported",
+    post_removed_reported: "post flagged reported",
+    comment_removed_reported: "comment flagged reported",
   };
 
   const FILTER_TABS = [
@@ -519,11 +519,11 @@ export default function NotificationPanel({ search = "" }: Props) {
                   <p className="text-foreground">
                     {n.type === "post_removed_reported" ? (
                       <span className="text-red-500 font-semibold">
-                        Post removed
+                        Post flagged
                       </span>
                     ) : n.type === "comment_removed_reported" ? (
                       <span className="text-red-500 font-semibold">
-                        Comment removed
+                        Comment flagged
                       </span>
                     ) : (
                       <span className="font-semibold">{getSenderName(n)}</span>
@@ -536,9 +536,9 @@ export default function NotificationPanel({ search = "" }: Props) {
                     {n.type === "comment" && "commented on your post"}
                     {n.type === "message" && "messaged you"}
                     {n.type === "post_removed_reported" &&
-                      "Your post was removed after receiving too many reports"}
+                      "Your post was flagged for review and hidden after receiving too many reports"}
                     {n.type === "comment_removed_reported" &&
-                      "Your comment was removed after receiving too many reports"}
+                      "Your comment was flagged for review and hidden after receiving too many reports"}
                   </p>
 
                   <p className="surface-text-muted mt-1 text-xs">

@@ -131,6 +131,7 @@ export const getPostComments = asyncHandler(async (req, res) => {
 
         let filter = {
             post: postId,
+            isFlaggedForReview: { $ne: true },
             ...(excludeUserIds.length ? { author: { $nin: excludeUserIds } } : {}),
         };
 
