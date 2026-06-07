@@ -978,6 +978,16 @@ export const blockUser = async (req, res) => {
             return res.status(400).json({ message: "User is already blocked" });
         }
 
+        // Post-commit sweep: clean up any notifications created between the
+        // transaction's Notification.deleteMany and this point (race window
+        // from concurrent likePost, sendMessage, or toggleFollow operations).
+        await Notification.deleteMany({
+            $or: [
+                { recipient: currentUserId, sender: targetUserId },
+                { recipient: targetUserId, sender: currentUserId },
+            ],
+        });
+
         // Emit socket events only after the transaction has committed
         const io = getIO();
         io.to(currentUserId).emit("user:blocked", { blockedUserId: targetUserId, blockerId: currentUserId });

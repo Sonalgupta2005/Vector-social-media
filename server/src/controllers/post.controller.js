@@ -476,41 +476,48 @@ export const likePost = asyncHandler(async (req, res) => {
 
     const liked = result.modifiedCount > 0;
 
-    if (liked && post.author.toString() !== userId) {
-        const [currentAuthor, freshCurrent] = await Promise.all([
-            User.findById(post.author).select("blockedUsers"),
-            User.findById(userId).select("blockedUsers"),
-        ]);
-        const stillBlocked = freshCurrent?.blockedUsers?.some(id => id.toString() === post.author.toString()) ||
-                            currentAuthor?.blockedUsers?.some(id => id.toString() === userId);
-        if (stillBlocked) {
-            await Post.updateOne({ _id: postId }, { $pull: { likes: userId } });
-            return res.json({ success: true, likesCount: 0, liked: false });
-        }
+        if (liked && post.author.toString() !== userId) {
+            // Final block re-verification before socket emission: a concurrent
+            // blockUser may have blocked since the mid-flight re-check above.
+            const [finalAuthor, finalCurrent] = await Promise.all([
+                User.findById(post.author).select("blockedUsers"),
+                User.findById(userId).select("blockedUsers"),
+            ]);
+            const finalBlocked = finalCurrent?.blockedUsers?.some(
+                id => id.toString() === post.author.toString()
+            ) || finalAuthor?.blockedUsers?.some(
+                id => id.toString() === userId
+            );
+            if (finalBlocked) {
+                await Notification.findOneAndDelete(
+                    { recipient: post.author, sender: userId, type: "like", post: postId }
+                );
+                return res.status(403).json({ success: false, message: "Action forbidden due to block status" });
+            }
 
-        const notification = await Notification.findOneAndUpdate(
-            {
-                recipient: post.author,
-                sender: userId,
-                type: "like",
-                post: postId,
-            },
-            {
-                $setOnInsert: {
+            const notification = await Notification.findOneAndUpdate(
+                {
                     recipient: post.author,
                     sender: userId,
                     type: "like",
                     post: postId,
                 },
-            },
-            { upsert: true, new: true }
-        );
+                {
+                    $setOnInsert: {
+                        recipient: post.author,
+                        sender: userId,
+                        type: "like",
+                        post: postId,
+                    },
+                },
+                { upsert: true, new: true }
+            );
 
-        getIO().to(post.author.toString()).emit("notification:new", {
-            notificationId: notification._id,
-            type: notification.type,
-        });
-    }
+            getIO().to(post.author.toString()).emit("notification:new", {
+                notificationId: notification._id,
+                type: notification.type,
+            });
+        }
 
     const updatedPost = await Post.findById(postId).select("likes");
 
