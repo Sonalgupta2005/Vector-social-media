@@ -209,6 +209,25 @@ export const markConversationAsRead = asyncHandler(async (req, res) => {
       return res.status(403).json({ message: "Not a participant in this conversation" });
     }
 
+    const otherParticipant = conversation.participants.find(
+      (p) => p.toString() !== req.user._id.toString()
+    );
+
+    if (otherParticipant) {
+      const [currentUser, otherUser] = await Promise.all([
+        User.findById(req.user._id).select("blockedUsers"),
+        User.findById(otherParticipant).select("blockedUsers"),
+      ]);
+      const isBlocked = currentUser?.blockedUsers?.some(
+        id => id.toString() === otherParticipant.toString()
+      ) || otherUser?.blockedUsers?.some(
+        id => id.toString() === req.user._id.toString()
+      );
+      if (isBlocked) {
+        return res.status(403).json({ message: "Action forbidden due to block status" });
+      }
+    }
+
     await Message.updateMany(
       {
         conversation: conversationId,
@@ -217,10 +236,6 @@ export const markConversationAsRead = asyncHandler(async (req, res) => {
         isDeleted: { $ne: true },
       },
       { $set: { isRead: true } }
-    );
-
-    const otherParticipant = conversation.participants.find(
-      (p) => p.toString() !== req.user._id.toString()
     );
 
     if (otherParticipant) {
