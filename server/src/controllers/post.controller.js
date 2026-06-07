@@ -14,6 +14,132 @@ import asyncHandler from "../utils/asyncHandler.js";
 // Prevents callers from triggering full-collection scans with deep .populate() chains.
 const MAX_LIMIT = 50;
 
+// --------------- Shared helpers for post listing ---------------
+
+const buildBlockExclusion = async (reqUser) => {
+  if (!reqUser) return { excludeUserIds: [], currentUserId: null };
+  const currentUserId = reqUser._id || reqUser.id;
+  const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
+  const blockerIds = blockers.map(u => u._id);
+  const blockedIds = reqUser.blockedUsers || [];
+  const excludeUserIds = [...blockedIds, ...blockerIds];
+  return { currentUserId, excludeUserIds };
+};
+
+const buildVisibilityFilter = (currentUserId, excludeUserIds, filter) => {
+  if (excludeUserIds.length > 0) {
+    filter.author = { $nin: excludeUserIds };
+  }
+  return filter;
+};
+
+const addPrivacyOrClause = async (currentUserId, filter) => {
+  const followingDocs = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
+  const followingIds = followingDocs.map(f => f.following);
+  filter.$or = [
+    { authorIsPrivate: { $ne: true } },
+    { author: { $in: [...followingIds, currentUserId] } }
+  ];
+};
+
+const applyCursorPagination = (filter, cursor) => {
+  if (cursor) {
+    if (mongoose.Types.ObjectId.isValid(cursor)) {
+      filter._id = { $lt: cursor };
+    } else {
+      return { error: "Invalid cursor format" };
+    }
+  }
+  return {};
+};
+
+const getLikesPopulate = (excludeUserIds) =>
+  excludeUserIds.length
+    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
+    : { path: "likes", select: "username name avatar _id" };
+
+const addBookmarkMeta = (posts, reqUser) => {
+  const userBookmarkSet = reqUser?.bookmarks
+    ? new Set(reqUser.bookmarks.map(String))
+    : new Set();
+  return posts.map(p => ({
+    ...(p.toObject ? p.toObject() : p),
+    isBookmarked: userBookmarkSet.has(p._id.toString()),
+  }));
+};
+
+const sendPaginatedResponse = (res, posts, limit) => {
+  const hasMore = posts.length === limit;
+  const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
+  res.status(200).json({ posts, limit, hasMore, nextCursor });
+};
+
+// --------------- Shared top-posts aggregation ---------------
+
+const getTopPosts = (daysAgo, maxResults) => async (req, res) => {
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - daysAgo);
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Math.min(
+      Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : maxResults,
+      maxResults
+    );
+    let filter = { createdAt: { $gte: since } };
+    let excludeUserIds = [];
+
+    if (req.user) {
+      const { currentUserId, excludeUserIds: exIds } = await buildBlockExclusion(req.user);
+      excludeUserIds = exIds;
+      filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
+      await addPrivacyOrClause(currentUserId, filter);
+    } else {
+      filter.authorIsPrivate = { $ne: true };
+    }
+
+    const posts = await Post.aggregate([
+      { $match: filter },
+      {
+        $addFields: {
+          likes: { $setDifference: ["$likes", excludeUserIds] },
+          likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
+          commentsCount: { $ifNull: ["$commentsCount", 0] },
+          sharesCount: { $ifNull: ["$sharesCount", 0] },
+        },
+      },
+      {
+        $addFields: {
+          engagementScore: {
+            $add: [
+              { $multiply: ["$likesCount", 4] },
+              { $multiply: ["$commentsCount", 3] },
+              { $multiply: ["$sharesCount", 2] },
+            ],
+          },
+        },
+      },
+      { $sort: { engagementScore: -1, createdAt: -1 } },
+      { $limit: limit },
+      { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
+      { $unwind: "$author" },
+      {
+        $project: {
+          _id: 1, content: 1, image: 1, intent: 1, likes: 1,
+          commentsCount: 1, sharesCount: 1, likesCount: 1,
+          createdAt: 1, updatedAt: 1,
+          "author._id": 1, "author.username": 1, "author.name": 1,
+          "author.surname": 1, "author.avatar": 1,
+        },
+      }
+    ]);
+
+    const postsWithMeta = addBookmarkMeta(posts, req.user);
+    res.status(200).json({ success: true, posts: postsWithMeta });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const removePostById = async (postId) => {
     const post = await Post.findById(postId);
     if (!post) {
@@ -109,64 +235,34 @@ export const getPosts = asyncHandler(async (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
         let filter = {};
-        let excludeUserIds = [];
         if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map(u => u._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
+            const { currentUserId, excludeUserIds } = await buildBlockExclusion(req.user);
+            filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
+            await addPrivacyOrClause(currentUserId, filter);
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
 
-            if (excludeUserIds.length > 0) {
-                filter = { author: { $nin: excludeUserIds } };
-            }
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate(excludeUserIds));
 
-            const followingDocs = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIds = followingDocs.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIds, currentUserId] } }
-            ];
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         } else {
             filter.authorIsPrivate = { $ne: true };
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
+
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate([]));
+
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         }
-
-        if (cursor) {
-            if (mongoose.Types.ObjectId.isValid(cursor)) {
-                filter._id = { $lt: cursor };
-            } else {
-                return res.status(400).json({ success: false, message: "Invalid cursor format" });
-            }
-        }
-
-        const posts = await Post.find(filter)
-            .sort({ _id: -1 })
-            .limit(limit)
-            .populate("author", "username name surname avatar")
-            .populate(
-                excludeUserIds.length
-                    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
-                    : { path: "likes", select: "username name avatar _id" }
-            );
-
-        const hasMore = posts.length === limit;
-        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
-
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map((p) => ({
-        ...p.toObject(),
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-            posts: postsWithMeta,
-            limit,
-            hasMore,
-            nextCursor,
-        });
-    
-});
+    });
 
 export const searchPosts = asyncHandler(async (req, res) => {
     
@@ -179,65 +275,34 @@ export const searchPosts = asyncHandler(async (req, res) => {
         }
 
         let filter = { $text: { $search: q } };
-        let excludeUserIds = [];
-        
         if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map(u => u._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
+            const { currentUserId, excludeUserIds } = await buildBlockExclusion(req.user);
+            filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
+            await addPrivacyOrClause(currentUserId, filter);
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
 
-            if (excludeUserIds.length > 0) {
-                filter.author = { $nin: excludeUserIds };
-            }
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate(excludeUserIds));
 
-            const followingDocs = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIds = followingDocs.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIds, currentUserId] } }
-            ];
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         } else {
             filter.authorIsPrivate = { $ne: true };
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
+
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate([]));
+
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         }
-
-        if (cursor) {
-            if (mongoose.Types.ObjectId.isValid(cursor)) {
-                filter._id = { $lt: cursor };
-            } else {
-                return res.status(400).json({ success: false, message: "Invalid cursor format" });
-            }
-        }
-
-        const posts = await Post.find(filter)
-            .sort({ _id: -1 })
-            .limit(limit)
-            .populate("author", "username name surname avatar")
-            .populate(
-                excludeUserIds.length
-                    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
-                    : { path: "likes", select: "username name avatar _id" }
-            );
-
-        const hasMore = posts.length === limit;
-        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
-
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map((p) => ({
-        ...p.toObject(),
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-            posts: postsWithMeta,
-            limit,
-            hasMore,
-            nextCursor,
-        });
-    
-});
+    });
 
 export const deletePost = asyncHandler(async (req, res) => {
     const postId = req.params.id;
@@ -643,198 +708,19 @@ export const getSinglePost = asyncHandler(async (req, res) => {
         res.json(postObj);
    
 });
+  
+export const getTopPostsOfWeek = getTopPosts(7, MAX_LIMIT);
 
-export const getTopPostsOfWeek = asyncHandler(async (req, res) => {
-        const oneWeekAgo = new Date();
-        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-        const requestedLimit = Number.parseInt(req.query.limit, 10);
-        const limit = Math.min(
-            Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : 10,
-            MAX_LIMIT
-        );
-        let filter = { createdAt: { $gte: oneWeekAgo } };
-        let excludeUserIds = [];
+export const getTopPostsOfMonth = getTopPosts(30, 3);
 
-        if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map((user) => user._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
 
-            if (excludeUserIds.length > 0) {
-                filter = {
-                    ...filter,
-                    author: { $nin: excludeUserIds },
-                };
-            }
-            const followingDocsWeek = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIdsWeek = followingDocsWeek.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIdsWeek, currentUserId] } }
-            ];
-        } else {
-            filter.authorIsPrivate = { $ne: true };
-        }
-
-        const posts = await Post.aggregate([
-            { $match: filter },
-            {
-                $addFields: {
-                    likes: { $setDifference: ["$likes", excludeUserIds] },
-                    likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
-                    commentsCount: { $ifNull: ["$commentsCount", 0] },
-                    sharesCount: { $size: { $setDifference: [{ $ifNull: ["$sharedBy", []] }, excludeUserIds] } },
-                },
-            },
-            {
-                $addFields: {
-                    engagementScore: {
-                        $add: [
-                            { $multiply: ["$likesCount", 4] },
-                            { $multiply: ["$commentsCount", 3] },
-                            { $multiply: ["$sharesCount", 2] },
-                        ],
-                    },
-                },
-            },
-            { $sort: { engagementScore: -1, createdAt: -1 } },
-            { $limit: limit },
-            { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
-            { $unwind: "$author" },
-            {
-                $project: {
-                    _id: 1,
-                    content: 1,
-                    image: 1,
-                    intent: 1,
-                    likes: 1,
-                    commentsCount: 1,
-                    sharesCount: 1,
-                    likesCount: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    "author._id": 1,
-                    "author.username": 1,
-                    "author.name": 1,
-                    "author.surname": 1,
-                    "author.avatar": 1,
-                },
-            }
-        ]);
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map(p => ({
-        ...p,
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-        success: true,
-        posts: postsWithMeta,
-        });
-   
-});
-
-export const getTopPostsOfMonth = asyncHandler(async (req, res) => {
-    
-        const oneMonthAgo = new Date();
-        oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-
-        let filter = { createdAt: { $gte: oneMonthAgo } };
-        let excludeUserIds = [];
-
-        if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map((user) => user._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
-
-            if (excludeUserIds.length > 0) {
-                filter = {
-                    ...filter,
-                    author: { $nin: excludeUserIds },
-                };
-            }
-            const followingDocsMonth = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIdsMonth = followingDocsMonth.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIdsMonth, currentUserId] } }
-            ];
-        } else {
-            filter.authorIsPrivate = { $ne: true };
-        }
-
-        const posts = await Post.aggregate([
-            { $match: filter },
-            {
-                $addFields: {
-                    likes: { $setDifference: ["$likes", excludeUserIds] },
-                    likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
-                    commentsCount: { $ifNull: ["$commentsCount", 0] },
-                    sharesCount: { $size: { $setDifference: [{ $ifNull: ["$sharedBy", []] }, excludeUserIds] } },
-                },
-            },
-            {
-                $addFields: {
-                    engagementScore: {
-                        $add: [
-                            { $multiply: ["$likesCount", 4] },
-                            { $multiply: ["$commentsCount", 3] },
-                            { $multiply: ["$sharesCount", 2] },
-                        ],
-                    },
-                },
-            },
-            { $sort: { engagementScore: -1, createdAt: -1 } },
-            { $limit: 3 },
-            { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
-            { $unwind: "$author" },
-            {
-                $project: {
-                    _id: 1,
-                    content: 1,
-                    image: 1,
-                    intent: 1,
-                    likes: 1,
-                    commentsCount: 1,
-                    sharesCount: 1,
-                    likesCount: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    "author._id": 1,
-                    "author.username": 1,
-                    "author.name": 1,
-                    "author.surname": 1,
-                    "author.avatar": 1,
-                },
-            },
-        ]);
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map(p => ({
-        ...p,
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-        success: true,
-        posts: postsWithMeta,
-        });
-    
-});
 
 export const incrementShare = asyncHandler(async (req, res) => {
-
         const postId = req.params.id;
-        const userId = req.user.id || req.user._id;
-
         if (!mongoose.Types.ObjectId.isValid(postId)) {
             return res.status(400).json({ success: false, message: "Invalid post ID format" });
         }
+        const userId = req.user.id || req.user._id;
 
         const post = await Post.findById(postId).select("author authorIsPrivate sharedBy sharesCount");
         if (!post) {
