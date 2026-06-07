@@ -156,19 +156,20 @@ export const getPostComments = asyncHandler(async (req, res) => {
 export const deleteComment = asyncHandler(async (req, res) => {
     const comment = await Comment.findById(req.params.commentId);
     if (!comment) {
-            return res.status(404).json({
-                message: "Comment not found"
-            });
-        }
-        if (comment.author.toString() !== req.user.id) {
-            return res.status(403).json({
-                message: "Not allowed"
-            });
-        }
-        await comment.deleteOne();
-        await Notification.deleteOne({ comment: comment._id, type: "comment" });
-        await Post.findByIdAndUpdate(comment.post, { $inc: { commentsCount: -1 }, });
-        res.json({
-            success: true
-        });
+        return res.status(404).json({ message: "Comment not found" });
+    }
+
+    const post = await Post.findById(comment.post).select("author");
+
+    const isCommentAuthor = comment.author.toString() === req.user.id;
+    const isPostAuthor = post?.author?.toString() === req.user.id;
+
+    if (!isCommentAuthor && !isPostAuthor) {
+        return res.status(403).json({ message: "Not allowed" });
+    }
+
+    await comment.deleteOne();
+    await Notification.deleteOne({ comment: comment._id, type: "comment" });
+    await Post.findByIdAndUpdate(comment.post, { $inc: { commentsCount: -1 } });
+    res.json({ success: true });
 });

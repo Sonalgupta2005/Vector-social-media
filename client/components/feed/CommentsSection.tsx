@@ -17,7 +17,7 @@ import { reportComment } from "@/lib/reportApi";
 import Linkify from "../ui/Linkify";
 
 
-export default function CommentsSection({ postId }: { postId: string }) {
+export default function CommentsSection({ postId, postAuthorId }: { postId: string; postAuthorId?: string }) {
     const { userData } = useAppContext();
     const [comments, setComments] = useState<Comment[]>([]);
     const [text, setText] = useState("");
@@ -173,8 +173,11 @@ export default function CommentsSection({ postId }: { postId: string }) {
                 )}
 
                 {comments.map((c) => {
-                    const isOwner =
-                        String(c.author?._id) === String(userData?.id);
+                    const isCommentAuthor =
+                        String(c.author?._id) === String(userData?._id);
+                    const isPostAuthor =
+                        postAuthorId && String(postAuthorId) === String(userData?._id);
+                    const canDelete = isCommentAuthor || isPostAuthor;
 
                     return (
                         <div key={c._id} className="flex gap-3 py-3 px-2 rounded-lg border-b border-border/50 last:border-b-0">
@@ -205,7 +208,7 @@ export default function CommentsSection({ postId }: { postId: string }) {
 
                                         {menuOpenId === c._id && (
                                             <div className="absolute right-0 top-6 z-20 w-36 overflow-hidden rounded-md border border-black/10 bg-white shadow-lg dark:border-white/10 dark:bg-blue-950">
-                                                {!isOwner && (
+                                                {!isCommentAuthor && (
                                                     <button
                                                         type="button"
                                                         className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
@@ -220,7 +223,7 @@ export default function CommentsSection({ postId }: { postId: string }) {
                                                     </button>
                                                 )}
 
-                                                {isOwner && (
+                                                {canDelete && (
                                                     <button
                                                         type="button"
                                                         className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
