@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Message from "../models/message.model.js";
 import Conversation from "../models/conversation.model.js";
 import Notification from "../models/notification.model.js";
@@ -129,10 +130,41 @@ export const sendMessage = asyncHandler(async (req, res) => {
       isRead: false,
     });
 
+    // Post-creation block re-verification: a concurrent blockUser may have
+    // deleted the conversation and notifications between the pre-check above
+    // and message creation. Re-check before emitting any socket events.
+    if (receiverId) {
+      const [postCreateReceiver, postCreateSender] = await Promise.all([
+        User.findById(receiverId).select("blockedUsers"),
+        User.findById(req.user._id).select("blockedUsers"),
+      ]);
+      const nowBlocked = postCreateSender?.blockedUsers?.some(
+        id => id.toString() === receiverId.toString()
+      ) || postCreateReceiver?.blockedUsers?.some(
+        id => id.toString() === req.user._id.toString()
+      );
+      if (nowBlocked) {
+        await Message.findByIdAndDelete(message._id);
+        return res.status(403).json({ message: "Action forbidden due to block status" });
+      }
+    }
+
     const populated = await message.populate(
       "sender",
       "username name avatar"
     );
+
+    // Update conversation timestamp BEFORE socket emission so all DB writes
+    // are confirmed before the client receives the real-time event.
+    const updatedConversation = await Conversation.findOneAndUpdate(
+      { _id: conversationId, participants: req.user._id },
+      { updatedAt: new Date() },
+      { new: true }
+    );
+    if (!updatedConversation) {
+      await Message.findByIdAndDelete(message._id);
+      return res.status(404).json({ message: "Conversation deleted during send" });
+    }
 
     if (receiverId) {
 
@@ -164,10 +196,6 @@ export const sendMessage = asyncHandler(async (req, res) => {
       io.to(receiverId.toString()).emit("receive_message", populated);
 
     }
-
-    await Conversation.findByIdAndUpdate(conversationId, {
-      updatedAt: new Date(),
-    });
 
     res.json(populated);
 
