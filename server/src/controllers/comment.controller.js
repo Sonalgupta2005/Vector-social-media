@@ -5,19 +5,20 @@ import User from "../models/user.model.js";
 import Follow from "../models/follow.model.js";
 import Notification from "../models/notification.model.js";
 import { getIO } from "../socket/socket.js";
-
+import { commentSchema } from "../validators/comment.validator.js";
+import asyncHandler from "../utils/asyncHandler.js";
 // Hard upper bound on comments returned per request.
 const MAX_LIMIT = 50;
 
-export const addComment = async (req, res) => {
-    try {
+export const addComment = asyncHandler(async (req, res) => {
         const { postId } = req.params;
-        const { content } = req.body;
-        if (!content?.trim()) {
+        const parsed = commentSchema.safeParse({ post: postId, content: req.body.content });
+        if (!parsed.success) {
             return res.status(400).json({
-                message: "Comment cannot be empty"
+                message: parsed.error.issues[0]?.message ?? "Invalid request",
             });
         }
+        const { content } = parsed.data;
         const post = await Post.findById(postId);
         if (!post) {
             return res.status(404).json({ message: "Post not found" });
@@ -85,13 +86,10 @@ export const addComment = async (req, res) => {
             });
         }
         return res.status(201).json(populated);
-    } catch (error) {
-        return res.status(500).json({ message: error.message });
-    }
-};
+   
+});
 
-export const getPostComments = async (req, res) => {
-    try {
+export const getPostComments = asyncHandler(async (req, res) => {
         const { postId } = req.params;
 
         const post = await Post.findById(postId).select("author");
@@ -153,31 +151,25 @@ export const getPostComments = async (req, res) => {
         const nextCursor = hasMore ? comments[comments.length - 1]._id : null;
 
         res.json({ comments, nextCursor, hasMore });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
+});
 
-export const deleteComment = async (req, res) => {
-    try {
-        const comment = await Comment.findById(req.params.commentId);
-        if (!comment) {
-            return res.status(404).json({
-                message: "Comment not found"
-            });
-        }
-        if (comment.author.toString() !== req.user.id) {
-            return res.status(403).json({
-                message: "Not allowed"
-            });
-        }
-        await comment.deleteOne();
-        await Notification.deleteOne({ comment: comment._id, type: "comment" });
-        await Post.findByIdAndUpdate(comment.post, { $inc: { commentsCount: -1 }, });
-        res.json({
-            success: true
-        });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+export const deleteComment = asyncHandler(async (req, res) => {
+    const comment = await Comment.findById(req.params.commentId);
+    if (!comment) {
+        return res.status(404).json({ message: "Comment not found" });
     }
-};
+
+    const post = await Post.findById(comment.post).select("author");
+
+    const isCommentAuthor = comment.author.toString() === req.user.id;
+    const isPostAuthor = post?.author?.toString() === req.user.id;
+
+    if (!isCommentAuthor && !isPostAuthor) {
+        return res.status(403).json({ message: "Not allowed" });
+    }
+
+    await comment.deleteOne();
+    await Notification.deleteOne({ comment: comment._id, type: "comment" });
+    await Post.findByIdAndUpdate(comment.post, { $inc: { commentsCount: -1 } });
+    res.json({ success: true });
+});

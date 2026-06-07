@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import jwt from "jsonwebtoken";
 import { generateToken, getCookieOptions } from "../utils/generateToken.js";
+import asyncHandler from "../utils/asyncHandler.js";
 
 const sendResetEmail = async (email, token) => {
     const transporter = nodemailer.createTransport({
@@ -51,8 +52,7 @@ const getValidationMessage = (validationResult, fallbackMessage) => {
     return firstIssue?.message || fallbackMessage;
 };
 
-export const register = async (req, res) => {
-    try {
+export const register = asyncHandler(async (req, res) => {
         if (typeof req.body?.name !== "string" || !req.body.name.trim()) {
             return res.status(400).json({
                 success: false,
@@ -126,16 +126,10 @@ if (!/^\d{10}$/.test(cleanedPhone)) {
             success: true,
             message: "Account created successfully",
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-};
+ 
+});
 
-export const getMe = async (req, res) => {
-    try {
+export const getMe = asyncHandler(async (req, res) => {
         if (!req.user) {
             return res.status(401).json({
                 success: false,
@@ -144,10 +138,12 @@ export const getMe = async (req, res) => {
         }
         const user = req.user;
 
-        const followings = await Follow.find({ follower: user._id, status: "accepted" }).select("following").lean();
-        const followers = await Follow.find({ following: user._id, status: "accepted" }).select("follower").lean();
-        const followRequests = await Follow.find({ following: user._id, status: "pending" }).select("follower").lean();
-
+       
+    const [followings, followers, followRequests] = await Promise.all([
+        Follow.find({ follower: user._id, status: "accepted" }).select("following").lean(),
+        Follow.find({ following: user._id, status: "accepted" }).select("follower").lean(),
+        Follow.find({ following: user._id, status: "pending" }).select("follower").lean(),
+    ]);
         return res.status(200).json({
             success: true,
             user: {
@@ -169,15 +165,9 @@ export const getMe = async (req, res) => {
                 blockedUsers: (user.blockedUsers || []).map(id => id.toString()),
             },
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-};
+});
 
-export const login = async (req, res) => {
+export const login = asyncHandler(async (req, res) => {
     const validation = loginSchema.safeParse(req.body);
 
     if (!validation.success) {
@@ -189,7 +179,6 @@ export const login = async (req, res) => {
 
     const { username, password } = validation.data;
 
-    try {
         const user = await User.findOne({ username }).select("+password");
         const matched = user && await bcrypt.compare(password, user.password);
         if (!user || !matched) {
@@ -204,16 +193,9 @@ export const login = async (req, res) => {
             success: true,
             message: "Logged In successfully"
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
+});
 
-export const logout = async (req, res) => {
-    try {
+export const logout = asyncHandler(async (req, res) => {
         const token = req.cookies?.token;
         if (token) {
             try {
@@ -230,16 +212,9 @@ export const logout = async (req, res) => {
             success: true,
             message: "Logged out successfully"
         });
-    } catch (error) {
-        return res.status(400).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
+});
 
-export const forgotPassword = async (req, res) => {
-    try {
+export const forgotPassword = asyncHandler(async (req, res) => {
         const validation = forgotPasswordSchema.safeParse(req.body);
 
         if (!validation.success) {
@@ -273,16 +248,9 @@ export const forgotPassword = async (req, res) => {
             success: true,
             message: "Password reset email sent successfully",
         });
-    } catch (error) {
-        return res.status(500).json({ 
-            success: false, 
-            message: error.message 
-        });
-    }
-};
+});
 
-export const resetPassword = async (req, res) => {
-    try {
+export const resetPassword = asyncHandler(async (req, res) => {
         const validation = resetPasswordSchema.safeParse(req.body);
 
         if (!validation.success) {
@@ -318,10 +286,5 @@ export const resetPassword = async (req, res) => {
             success: true,
             message: "Password reset successful"
         });
-    } catch (error) {
-        return res.status(500).json({ 
-            success: false, 
-            message: error.message 
-        });
-    }
-};
+    
+});

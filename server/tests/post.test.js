@@ -359,11 +359,11 @@ describe('Post and Comment Flows', () => {
     });
   });
 
-  describe('Like Toggle', () => {
+  describe('Like / Unlike', () => {
     it('should like and then unlike a post', async () => {
       // Like
       const likeRes = await request(app)
-        .post(`/api/posts/like/${post._id}`)
+        .post(`/api/posts/${post._id}/like`)
         .set('Cookie', cookie);
 
       expect(likeRes.body.success).toBe(true);
@@ -372,7 +372,7 @@ describe('Post and Comment Flows', () => {
 
       // Unlike
       const unlikeRes = await request(app)
-        .post(`/api/posts/like/${post._id}`)
+        .post(`/api/posts/${post._id}/unlike`)
         .set('Cookie', cookie);
 
       expect(unlikeRes.body.success).toBe(true);

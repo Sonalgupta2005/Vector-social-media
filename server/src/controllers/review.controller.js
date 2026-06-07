@@ -1,11 +1,10 @@
 import mongoose from "mongoose";
 import Review from "../models/review.model.js";
-
+import asyncHandler from "../utils/asyncHandler.js";
 const MAX_LIMIT = 50;
 
-export const createReview = async (req, res) => {
-  try {
-    let { stars, comment, target } = req.body;
+export const createReview = asyncHandler(async (req, res) => {
+  let { stars, comment, target } = req.body;
 
     if (!stars || !Number.isInteger(stars) || stars < 1 || stars > 5) {
       return res.status(400).json({
@@ -53,16 +52,9 @@ export const createReview = async (req, res) => {
       success: true,
       review: populated,
     });
-  } catch (error) {
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+});
 
-export const getReviews = async (req, res) => {
-  try {
+export const getReviews = asyncHandler(async (req, res) => {
     const cursor = req.query.cursor;
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
     const target = req.query.target;
@@ -105,17 +97,11 @@ export const getReviews = async (req, res) => {
       nextCursor,
       limit,
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
 
-export const getAverage = async (req, res) => {
-  try {
-    const { target } = req.query;
+});
+
+export const getAverage = asyncHandler(async (req, res) => {
+  const { target } = req.query;
 
     let match = {};
     if (target) {
@@ -146,10 +132,4 @@ export const getAverage = async (req, res) => {
       average: Math.round(stats.averageStars * 10) / 10,
       count: stats.totalReviews,
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+});

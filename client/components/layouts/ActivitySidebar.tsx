@@ -8,6 +8,7 @@ import { useAppContext } from "@/context/AppContext";
 import FollowButton from "../ui/FollowButton";
 import { useRouter } from "next/navigation";
 import InlineLoader from "../loaders/InlineLoader";
+import SearchBar from "@/components/SearchBar";
 
 type SuggestedUser = {
   _id: string;
@@ -172,16 +173,11 @@ export default function ActivitySidebar() {
 
         {/* Search */}
         <div className="relative mt-7 mb-5">
-          <div className="search-pill">
-            <Search className="h-5" />
-            <input
-              type="text"
-              placeholder="Search users"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="h-full w-full bg-transparent outline-0 placeholder:text-muted-foreground"
-            />
-          </div>
+          <SearchBar
+            placeholder="Search users"
+            value={query}
+            onChange={setQuery}
+          />
 
           {query.trim() && (
             <div className="absolute z-50 mt-2 w-full max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">

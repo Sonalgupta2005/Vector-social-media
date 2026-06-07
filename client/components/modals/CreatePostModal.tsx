@@ -188,18 +188,40 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreateModalP
         }
     };
 
+    // -------------------------------------------------------------------
+    // FIX: Save Draft now only saves what can actually be restored.
+    // File objects (imageFile) are binary and cannot be serialised into
+    // localStorage — so the draft only stores text content and intent,
+    // exactly what the restore flow reads back.
+    //
+    // The Save Draft button is therefore disabled when the only thing
+    // present is a selected image with no text or intent chosen.
+    // This prevents the misleading UX where a user saves a draft and
+    // reopens the modal to find their image gone.
+    //
+    // canSaveDraft mirrors exactly what the draft actually persists:
+    //   content (text) OR intent selection.
+    // -------------------------------------------------------------------
+    const canSaveDraft = content.trim().length > 0 || intent !== "";
+
     const handleSaveDraft = () => {
         const draft = {
             content,
             intent,
+            savedAt: new Date().toISOString(),
         };
 
-        localStorage.setItem(
-            "postDraft",
-            JSON.stringify(draft)
-        );
+        localStorage.setItem("postDraft", JSON.stringify(draft));
 
-        toast.success("Draft saved!");
+        // Warn the user if they also have an image selected, since it
+        // cannot be saved as part of the draft.
+        if (imageFile) {
+            toast.success("Draft saved! Note: your selected image was not saved and will need to be re-attached.");
+        } else {
+            toast.success("Draft saved!");
+        }
+
+        setLastSaved(new Date());
     };
 
     const intents = [
@@ -296,6 +318,7 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreateModalP
                     <div className="relative">
                         <textarea
                             maxLength={MAX_CHARS}
+                            autoComplete="off"
                             placeholder="What's on your mind? Share your thoughts..."
                             value={content}
                             onChange={(e) => {
@@ -415,10 +438,21 @@ export default function CreatePostModal({ onClose, onPostCreated }: CreateModalP
                                 Cancel
                             </Button>
 
+                            {/* -------------------------------------------------------------------
+                                FIX: disabled now uses canSaveDraft instead of (!content.trim() && !imageFile).
+                                Previously the button enabled as soon as an image was selected, even
+                                with no text or intent — but handleSaveDraft never saved imageFile
+                                (File objects cannot be stored in localStorage). This meant clicking
+                                Save Draft with an image-only state silently lost the image.
+                                Now the button only enables when content or intent is present,
+                                i.e. when there is actually something that can be restored later.
+                                If the user has both text AND an image, the draft saves the text and
+                                a toast warns them the image will need to be re-attached.
+                            ------------------------------------------------------------------- */}
                             <Button
                                 variant="secondary"
                                 onClick={handleSaveDraft}
-                                disabled={!content.trim() && !imageFile}
+                                disabled={!canSaveDraft}
                                 className="rounded-xl px-4 font-semibold flex-1"
                             >
                                 Save Draft

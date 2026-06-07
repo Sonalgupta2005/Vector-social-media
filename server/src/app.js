@@ -14,7 +14,7 @@ import conversationRouter from "./routes/conversation.routes.js";
 import reportRouter from "./routes/report.routes.js";
 import contactRouter from "./routes/contact.routes.js";
 import reviewRouter from "./routes/review.routes.js";
-
+import errorHandler from "./middlewares/error.middleware.js";
 const app = express();
 
 app.set("trust proxy", 1);
@@ -58,5 +58,7 @@ app.use("/api/conversation", conversationRouter);
 app.use("/api/reports", reportRouter);
 app.use("/api/contact", contactRouter);
 app.use("/api/reviews", reviewRouter);
+
+app.use(errorHandler);
 
 export default app;

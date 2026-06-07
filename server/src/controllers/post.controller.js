@@ -9,10 +9,136 @@ import cloudinary from "../config/cloudinary.js";
 import { getIO } from "../socket/socket.js";
 import { uploadToCloudinary } from "../utils/uploadCleanup.js";
 import { cleanupTempUpload, IMAGE_UPLOAD_LIMITS, validateImageUpload } from "../utils/imageUploadValidation.js";
-
+import asyncHandler from "../utils/asyncHandler.js";
 // Hard upper bound on result-set size for any list endpoint in this controller.
 // Prevents callers from triggering full-collection scans with deep .populate() chains.
 const MAX_LIMIT = 50;
+
+// --------------- Shared helpers for post listing ---------------
+
+const buildBlockExclusion = async (reqUser) => {
+  if (!reqUser) return { excludeUserIds: [], currentUserId: null };
+  const currentUserId = reqUser._id || reqUser.id;
+  const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
+  const blockerIds = blockers.map(u => u._id);
+  const blockedIds = reqUser.blockedUsers || [];
+  const excludeUserIds = [...blockedIds, ...blockerIds];
+  return { currentUserId, excludeUserIds };
+};
+
+const buildVisibilityFilter = (currentUserId, excludeUserIds, filter) => {
+  if (excludeUserIds.length > 0) {
+    filter.author = { $nin: excludeUserIds };
+  }
+  return filter;
+};
+
+const addPrivacyOrClause = async (currentUserId, filter) => {
+  const followingDocs = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
+  const followingIds = followingDocs.map(f => f.following);
+  filter.$or = [
+    { authorIsPrivate: { $ne: true } },
+    { author: { $in: [...followingIds, currentUserId] } }
+  ];
+};
+
+const applyCursorPagination = (filter, cursor) => {
+  if (cursor) {
+    if (mongoose.Types.ObjectId.isValid(cursor)) {
+      filter._id = { $lt: cursor };
+    } else {
+      return { error: "Invalid cursor format" };
+    }
+  }
+  return {};
+};
+
+const getLikesPopulate = (excludeUserIds) =>
+  excludeUserIds.length
+    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
+    : { path: "likes", select: "username name avatar _id" };
+
+const addBookmarkMeta = (posts, reqUser) => {
+  const userBookmarkSet = reqUser?.bookmarks
+    ? new Set(reqUser.bookmarks.map(String))
+    : new Set();
+  return posts.map(p => ({
+    ...(p.toObject ? p.toObject() : p),
+    isBookmarked: userBookmarkSet.has(p._id.toString()),
+  }));
+};
+
+const sendPaginatedResponse = (res, posts, limit) => {
+  const hasMore = posts.length === limit;
+  const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
+  res.status(200).json({ posts, limit, hasMore, nextCursor });
+};
+
+// --------------- Shared top-posts aggregation ---------------
+
+const getTopPosts = (daysAgo, maxResults) => async (req, res) => {
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - daysAgo);
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Math.min(
+      Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : maxResults,
+      maxResults
+    );
+    let filter = { createdAt: { $gte: since } };
+    let excludeUserIds = [];
+
+    if (req.user) {
+      const { currentUserId, excludeUserIds: exIds } = await buildBlockExclusion(req.user);
+      excludeUserIds = exIds;
+      filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
+      await addPrivacyOrClause(currentUserId, filter);
+    } else {
+      filter.authorIsPrivate = { $ne: true };
+    }
+
+    const posts = await Post.aggregate([
+      { $match: filter },
+      {
+        $addFields: {
+          likes: { $setDifference: ["$likes", excludeUserIds] },
+          likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
+          commentsCount: { $ifNull: ["$commentsCount", 0] },
+          sharesCount: { $ifNull: ["$sharesCount", 0] },
+        },
+      },
+      {
+        $addFields: {
+          engagementScore: {
+            $add: [
+              { $multiply: ["$likesCount", 4] },
+              { $multiply: ["$commentsCount", 3] },
+              { $multiply: ["$sharesCount", 2] },
+            ],
+          },
+        },
+      },
+      { $sort: { engagementScore: -1, createdAt: -1 } },
+      { $limit: limit },
+      { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
+      { $unwind: "$author" },
+      {
+        $project: {
+          _id: 1, content: 1, image: 1, intent: 1, likes: 1,
+          commentsCount: 1, sharesCount: 1, likesCount: 1,
+          createdAt: 1, updatedAt: 1,
+          "author._id": 1, "author.username": 1, "author.name": 1,
+          "author.surname": 1, "author.avatar": 1,
+        },
+      }
+    ]);
+
+    const postsWithMeta = addBookmarkMeta(posts, req.user);
+    res.status(200).json({ success: true, posts: postsWithMeta });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 export const removePostById = async (postId) => {
     const post = await Post.findById(postId);
@@ -104,78 +230,42 @@ export const createPost = async (req, res) => {
     }
 }
 
-export const getPosts = async (req, res) => {
-    try {
+export const getPosts = asyncHandler(async (req, res) => {
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
         let filter = {};
-        let excludeUserIds = [];
         if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map(u => u._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
+            const { currentUserId, excludeUserIds } = await buildBlockExclusion(req.user);
+            filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
+            await addPrivacyOrClause(currentUserId, filter);
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
 
-            if (excludeUserIds.length > 0) {
-                filter = { author: { $nin: excludeUserIds } };
-            }
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate(excludeUserIds));
 
-            const followingDocs = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIds = followingDocs.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIds, currentUserId] } }
-            ];
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         } else {
             filter.authorIsPrivate = { $ne: true };
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
+
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate([]));
+
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         }
+    });
 
-        if (cursor) {
-            if (mongoose.Types.ObjectId.isValid(cursor)) {
-                filter._id = { $lt: cursor };
-            } else {
-                return res.status(400).json({ success: false, message: "Invalid cursor format" });
-            }
-        }
-
-        const posts = await Post.find(filter)
-            .sort({ _id: -1 })
-            .limit(limit)
-            .populate("author", "username name surname avatar")
-            .populate(
-                excludeUserIds.length
-                    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
-                    : { path: "likes", select: "username name avatar _id" }
-            );
-
-        const hasMore = posts.length === limit;
-        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
-
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map((p) => ({
-        ...p.toObject(),
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-            posts: postsWithMeta,
-            limit,
-            hasMore,
-            nextCursor,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-}
-
-export const searchPosts = async (req, res) => {
-    try {
+export const searchPosts = asyncHandler(async (req, res) => {
+    
         const q = req.query.q?.trim();
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
@@ -185,78 +275,41 @@ export const searchPosts = async (req, res) => {
         }
 
         let filter = { $text: { $search: q } };
-        let excludeUserIds = [];
-        
         if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map(u => u._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
+            const { currentUserId, excludeUserIds } = await buildBlockExclusion(req.user);
+            filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
+            await addPrivacyOrClause(currentUserId, filter);
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
 
-            if (excludeUserIds.length > 0) {
-                filter.author = { $nin: excludeUserIds };
-            }
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate(excludeUserIds));
 
-            const followingDocs = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIds = followingDocs.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIds, currentUserId] } }
-            ];
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         } else {
             filter.authorIsPrivate = { $ne: true };
+            const cursorErr = applyCursorPagination(filter, cursor);
+            if (cursorErr.error) return res.status(400).json({ success: false, message: cursorErr.error });
+
+            const posts = await Post.find(filter)
+                .sort({ _id: -1 })
+                .limit(limit)
+                .populate("author", "username name surname avatar")
+                .populate(getLikesPopulate([]));
+
+            sendPaginatedResponse(res, addBookmarkMeta(posts, req.user), limit);
         }
+    });
 
-        if (cursor) {
-            if (mongoose.Types.ObjectId.isValid(cursor)) {
-                filter._id = { $lt: cursor };
-            } else {
-                return res.status(400).json({ success: false, message: "Invalid cursor format" });
-            }
-        }
-
-        const posts = await Post.find(filter)
-            .sort({ _id: -1 })
-            .limit(limit)
-            .populate("author", "username name surname avatar")
-            .populate(
-                excludeUserIds.length
-                    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
-                    : { path: "likes", select: "username name avatar _id" }
-            );
-
-        const hasMore = posts.length === limit;
-        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
-
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map((p) => ({
-        ...p.toObject(),
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-            posts: postsWithMeta,
-            limit,
-            hasMore,
-            nextCursor,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
+export const deletePost = asyncHandler(async (req, res) => {
+    const postId = req.params.id;
+    
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+        return res.status(400).json({ success: false, message: "Invalid post ID format" });
     }
-}
-
-export const deletePost = async (req, res) => {
-    try {
-        const postId = req.params.id;
-        
-        if (!mongoose.Types.ObjectId.isValid(postId)) {
-            return res.status(400).json({ success: false, message: "Invalid post ID format" });
-        }
 
         const userId = req.user.id;
         const post = await Post.findById(postId);
@@ -278,13 +331,8 @@ export const deletePost = async (req, res) => {
             success: true,
             message: "Post deleted successfully",
         });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message,
-        });
-    }
-};
+   
+});
 
 export const updatePost = async (req, res) => {
     let newImagePublicId = null;
@@ -386,69 +434,67 @@ export const updatePost = async (req, res) => {
     }
 };
 
-export const toggleLike = async (req, res) => {
-    try {
-        const postId = req.params.id;
-        const userId = req.user.id;
+const likeBlockCheck = async (postId, userId, postAuthorId) => {
+    if (postAuthorId.toString() === userId) return null;
+    const [authorUser, currentUser] = await Promise.all([
+        User.findById(postAuthorId).select("blockedUsers"),
+        User.findById(userId).select("blockedUsers"),
+    ]);
+    const isBlocked = currentUser?.blockedUsers?.some(
+        id => id.toString() === postAuthorId.toString()
+    ) || authorUser?.blockedUsers?.some(
+        id => id.toString() === userId
+    );
+    if (isBlocked) {
+        return { success: false, message: "Action forbidden due to block status" };
+    }
+    return null;
+};
 
-        if (!mongoose.Types.ObjectId.isValid(postId)) {
-            return res.status(400).json({ success: false, message: "Invalid post ID format" });
-        }
+export const likePost = asyncHandler(async (req, res) => {
+    const postId = req.params.id;
+    const userId = req.user.id;
 
-        const post = await Post.findById(postId).select("author");
-        if (!post) {
-            return res.status(404).json({ success: false });
-        }
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+        return res.status(400).json({ success: false, message: "Invalid post ID format" });
+    }
 
-        // Check block status between the requester and the post author
-        if (post.author.toString() !== userId) {
-            const [authorUser, currentUser] = await Promise.all([
+    const post = await Post.findById(postId).select("author");
+    if (!post) {
+        return res.status(404).json({ success: false });
+    }
+
+    const blockError = await likeBlockCheck(postId, userId, post.author);
+    if (blockError) {
+        return res.status(403).json(blockError);
+    }
+
+    const result = await Post.updateOne(
+        { _id: postId, likes: { $ne: userId } },
+        { $addToSet: { likes: userId } }
+    );
+
+    const liked = result.modifiedCount > 0;
+
+        if (liked && post.author.toString() !== userId) {
+            // Final block re-verification before socket emission: a concurrent
+            // blockUser may have blocked since the mid-flight re-check above.
+            const [finalAuthor, finalCurrent] = await Promise.all([
                 User.findById(post.author).select("blockedUsers"),
                 User.findById(userId).select("blockedUsers"),
             ]);
-            const isBlocked = currentUser?.blockedUsers?.some(
+            const finalBlocked = finalCurrent?.blockedUsers?.some(
                 id => id.toString() === post.author.toString()
-            ) || authorUser?.blockedUsers?.some(
+            ) || finalAuthor?.blockedUsers?.some(
                 id => id.toString() === userId
             );
-            if (isBlocked) {
+            if (finalBlocked) {
+                await Notification.findOneAndDelete(
+                    { recipient: post.author, sender: userId, type: "like", post: postId }
+                );
                 return res.status(403).json({ success: false, message: "Action forbidden due to block status" });
             }
-        }
 
-        // Atomically determine whether the user was added or removed
-        const addResult = await Post.updateOne(
-            { _id: postId, likes: { $ne: userId } },
-            { $addToSet: { likes: userId } }
-        );
-
-        let liked = addResult.modifiedCount > 0;
-
-        if (!liked) {
-            await Post.updateOne(
-                { _id: postId, likes: userId },
-                { $pull: { likes: userId } }
-            );
-            await Notification.deleteOne({ recipient: post.author, sender: userId, type: "like", post: postId });
-        }
-
-        // Re-verify block status — either side may have blocked since the pre-check
-        if (liked && post.author.toString() !== userId) {
-            const [currentAuthor, freshCurrent] = await Promise.all([
-                User.findById(post.author).select("blockedUsers"),
-                User.findById(userId).select("blockedUsers"),
-            ]);
-            const stillBlocked = freshCurrent?.blockedUsers?.some(id => id.toString() === post.author.toString()) ||
-                                currentAuthor?.blockedUsers?.some(id => id.toString() === userId);
-            if (stillBlocked) {
-                await Post.updateOne({ _id: postId }, { $pull: { likes: userId } });
-                liked = false;
-            }
-        }
-
-        const updatedPost = await Post.findById(postId).select("likes");
-
-        if (liked && post.author.toString() !== userId) {
             const notification = await Notification.findOneAndUpdate(
                 {
                     recipient: post.author,
@@ -473,20 +519,56 @@ export const toggleLike = async (req, res) => {
             });
         }
 
-        res.json({
-            success: true,
-            likesCount: updatedPost.likes.length,
-            liked,
-        });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+    const updatedPost = await Post.findById(postId).select("likes");
 
-export const getPostsByUser = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
+    res.json({
+        success: true,
+        likesCount: updatedPost.likes.length,
+        liked,
+    });
+});
+
+export const unlikePost = asyncHandler(async (req, res) => {
+    const postId = req.params.id;
+    const userId = req.user.id;
+
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+        return res.status(400).json({ success: false, message: "Invalid post ID format" });
+    }
+
+    const post = await Post.findById(postId).select("author");
+    if (!post) {
+        return res.status(404).json({ success: false });
+    }
+
+    const blockError = await likeBlockCheck(postId, userId, post.author);
+    if (blockError) {
+        return res.status(403).json(blockError);
+    }
+
+    const result = await Post.updateOne(
+        { _id: postId, likes: userId },
+        { $pull: { likes: userId } }
+    );
+
+    const unliked = result.modifiedCount > 0;
+
+    if (unliked) {
+        await Notification.deleteOne({ recipient: post.author, sender: userId, type: "like", post: postId });
+    }
+
+    const updatedPost = await Post.findById(postId).select("likes");
+
+    res.json({
+        success: true,
+        likesCount: updatedPost.likes.length,
+        liked: false,
+    });
+});
+
+export const getPostsByUser = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    
         if (!mongoose.Types.ObjectId.isValid(userId)) {
             return res.status(400).json({
                 success: false,
@@ -573,18 +655,12 @@ export const getPostsByUser = async (req, res) => {
         nextCursor,
         limit,
         });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch user posts: " + error.message,
-        });
-    }
-};
+   
+});
 
-export const getSinglePost = async (req, res) => {
-    try {
-        const { postId } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(postId)) {
+export const getSinglePost = asyncHandler(async (req, res) => {
+    const { postId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
             return res.status(400).json({ message: "Invalid post ID format" });
         }
 
@@ -637,238 +713,66 @@ export const getSinglePost = async (req, res) => {
             ? req.user.bookmarks.map(String).includes(post._id.toString())
             : false;
         res.json(postObj);
-    } catch (error) {
-        res.status(500).json({ message: "Server error: " + error.message });
-    }
-};
+   
+});
+  
+export const getTopPostsOfWeek = getTopPosts(7, MAX_LIMIT);
 
-export const getTopPostsOfWeek = async (req, res) => {
-    try {
-        const oneWeekAgo = new Date();
-        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-        const requestedLimit = Number.parseInt(req.query.limit, 10);
-        const limit = Math.min(
-            Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : 10,
-            MAX_LIMIT
-        );
-        let filter = { createdAt: { $gte: oneWeekAgo } };
-        let excludeUserIds = [];
+export const getTopPostsOfMonth = getTopPosts(30, 3);
 
-        if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map((user) => user._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
 
-            if (excludeUserIds.length > 0) {
-                filter = {
-                    ...filter,
-                    author: { $nin: excludeUserIds },
-                };
-            }
-            const followingDocsWeek = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIdsWeek = followingDocsWeek.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIdsWeek, currentUserId] } }
-            ];
-        } else {
-            filter.authorIsPrivate = { $ne: true };
-        }
 
-        const posts = await Post.aggregate([
-            { $match: filter },
-            {
-                $addFields: {
-                    likes: { $setDifference: ["$likes", excludeUserIds] },
-                    likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
-                    commentsCount: { $ifNull: ["$commentsCount", 0] },
-                    sharesCount: { $ifNull: ["$sharesCount", 0] },
-                },
-            },
-            {
-                $addFields: {
-                    engagementScore: {
-                        $add: [
-                            { $multiply: ["$likesCount", 4] },
-                            { $multiply: ["$commentsCount", 3] },
-                            { $multiply: ["$sharesCount", 2] },
-                        ],
-                    },
-                },
-            },
-            { $sort: { engagementScore: -1, createdAt: -1 } },
-            { $limit: limit },
-            { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
-            { $unwind: "$author" },
-            {
-                $project: {
-                    _id: 1,
-                    content: 1,
-                    image: 1,
-                    intent: 1,
-                    likes: 1,
-                    commentsCount: 1,
-                    sharesCount: 1,
-                    likesCount: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    "author._id": 1,
-                    "author.username": 1,
-                    "author.name": 1,
-                    "author.surname": 1,
-                    "author.avatar": 1,
-                },
-            }
-        ]);
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map(p => ({
-        ...p,
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-        success: true,
-        posts: postsWithMeta,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
-
-export const getTopPostsOfMonth = async (req, res) => {
-    try {
-        const oneMonthAgo = new Date();
-        oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-
-        let filter = { createdAt: { $gte: oneMonthAgo } };
-        let excludeUserIds = [];
-
-        if (req.user) {
-            const currentUserId = req.user._id || req.user.id;
-            const blockers = await User.find({ blockedUsers: currentUserId }).select("_id");
-            const blockerIds = blockers.map((user) => user._id);
-            const blockedIds = req.user.blockedUsers || [];
-            excludeUserIds = [...blockedIds, ...blockerIds];
-
-            if (excludeUserIds.length > 0) {
-                filter = {
-                    ...filter,
-                    author: { $nin: excludeUserIds },
-                };
-            }
-            const followingDocsMonth = await Follow.find({ follower: currentUserId, status: "accepted" }).select("following").lean();
-            const followingIdsMonth = followingDocsMonth.map(f => f.following);
-            filter.$or = [
-                { authorIsPrivate: { $ne: true } },
-                { author: { $in: [...followingIdsMonth, currentUserId] } }
-            ];
-        } else {
-            filter.authorIsPrivate = { $ne: true };
-        }
-
-        const posts = await Post.aggregate([
-            { $match: filter },
-            {
-                $addFields: {
-                    likes: { $setDifference: ["$likes", excludeUserIds] },
-                    likesCount: { $size: { $setDifference: ["$likes", excludeUserIds] } },
-                    commentsCount: { $ifNull: ["$commentsCount", 0] },
-                    sharesCount: { $ifNull: ["$sharesCount", 0] },
-                },
-            },
-            {
-                $addFields: {
-                    engagementScore: {
-                        $add: [
-                            { $multiply: ["$likesCount", 4] },
-                            { $multiply: ["$commentsCount", 3] },
-                            { $multiply: ["$sharesCount", 2] },
-                        ],
-                    },
-                },
-            },
-            { $sort: { engagementScore: -1, createdAt: -1 } },
-            { $limit: 3 },
-            { $lookup: { from: "users", localField: "author", foreignField: "_id", as: "author" } },
-            { $unwind: "$author" },
-            {
-                $project: {
-                    _id: 1,
-                    content: 1,
-                    image: 1,
-                    intent: 1,
-                    likes: 1,
-                    commentsCount: 1,
-                    sharesCount: 1,
-                    likesCount: 1,
-                    createdAt: 1,
-                    updatedAt: 1,
-                    "author._id": 1,
-                    "author.username": 1,
-                    "author.name": 1,
-                    "author.surname": 1,
-                    "author.avatar": 1,
-                },
-            },
-        ]);
-        const userBookmarkSet = req.user?.bookmarks
-            ? new Set(req.user.bookmarks.map(String))
-            : new Set();
-        const postsWithMeta = posts.map(p => ({
-        ...p,
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
-        res.status(200).json({
-        success: true,
-        posts: postsWithMeta,
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-};
-
-export const incrementShare = async (req, res) => {
-    try {
+export const incrementShare = asyncHandler(async (req, res) => {
         const postId = req.params.id;
-        const userId = req.user.id || req.user._id;
-
         if (!mongoose.Types.ObjectId.isValid(postId)) {
             return res.status(400).json({ success: false, message: "Invalid post ID format" });
         }
+        const userId = req.user.id || req.user._id;
 
-        const post = await Post.findOneAndUpdate(
+        const post = await Post.findById(postId).select("author authorIsPrivate sharedBy sharesCount");
+        if (!post) {
+            return res.status(404).json({ success: false, message: "Post not found" });
+        }
+
+        if (post.author.toString() !== userId.toString()) {
+            const [authorUser, currentUser] = await Promise.all([
+                User.findById(post.author).select("blockedUsers"),
+                User.findById(userId).select("blockedUsers"),
+            ]);
+            const isBlocked = currentUser?.blockedUsers?.some(
+                id => id.toString() === post.author.toString()
+            ) || authorUser?.blockedUsers?.some(
+                id => id.toString() === userId.toString()
+            );
+            if (isBlocked) {
+                return res.status(403).json({ success: false, message: "Action forbidden due to block status" });
+            }
+
+            if (post.authorIsPrivate) {
+                const isFollower = await Follow.exists({ follower: userId, following: post.author, status: "accepted" });
+                if (!isFollower) {
+                    return res.status(403).json({ success: false, message: "This account is private. Follow to interact with their posts." });
+                }
+            }
+        }
+
+        const updatedPost = await Post.findOneAndUpdate(
             { _id: postId, sharedBy: { $ne: userId } },
             { $addToSet: { sharedBy: userId }, $inc: { sharesCount: 1 } },
             { new: true }
         );
 
-        if (!post) {
-            const exists = await Post.exists({ _id: postId });
-            if (!exists) {
-                return res.status(404).json({ success: false, message: "Post not found" });
-            }
+        if (!updatedPost) {
             return res.status(409).json({ success: false, message: "Already shared" });
         }
 
         res.json({
             success: true,
-            sharesCount: post.sharesCount,
+            sharesCount: updatedPost.sharesCount,
         });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-export const toggleBookmark = async (req, res) => {
-  try {
+   
+});
+export const toggleBookmark = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id || req.user._id;
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -921,15 +825,12 @@ export const toggleBookmark = async (req, res) => {
       bookmarked: !isBookmarked,
       message: isBookmarked ? "Removed from bookmarks" : "Added to bookmarks",
     });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+  
+});
 
-export const getBookmarks = async (req, res) => {
-  try {
-    const { cursor } = req.query;
-    const limit = 10;
+export const getBookmarks = asyncHandler(async (req, res) => {
+  const { cursor } = req.query;
+  const limit = 10;
     const user = await User.findById(req.user.id).select("bookmarks").lean();
     if (!user)
       return res
@@ -990,7 +891,5 @@ export const getBookmarks = async (req, res) => {
       ? pagePosts[pagePosts.length - 1]._id.toString()
       : null;
     res.json({ posts: postsWithMeta, nextCursor });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+ 
+});

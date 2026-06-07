@@ -7,7 +7,8 @@ import {
     getSinglePost, 
     getTopPostsOfWeek,
     getTopPostsOfMonth,
-    toggleLike, 
+    likePost,
+    unlikePost,
     incrementShare,
     updatePost,toggleBookmark,
     getBookmarks,
@@ -28,8 +29,8 @@ postRouter.get("/top-month", optionalAuth, getTopPostsOfMonth);
 postRouter.get("/bookmarks", authMiddleware, getBookmarks); 
 postRouter.get("/user/:userId", optionalAuth, getPostsByUser);
 postRouter.get("/:postId", optionalAuth, getSinglePost);
-postRouter.post("/like/:id", authMiddleware, socialActionLimiter, toggleLike);
-postRouter.put("/:id/like", authMiddleware, socialActionLimiter, toggleLike);
+postRouter.post("/:id/like", authMiddleware, socialActionLimiter, likePost);
+postRouter.post("/:id/unlike", authMiddleware, socialActionLimiter, unlikePost);
 postRouter.put("/:id/share", authMiddleware, socialActionLimiter, incrementShare);
 postRouter.put("/:id", authMiddleware, postWriteLimiter, uploadImage("image"), updatePost);
 postRouter.delete("/:id", authMiddleware, postWriteLimiter, deletePost);

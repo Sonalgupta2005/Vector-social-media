@@ -11,6 +11,7 @@ import { toast } from "react-toastify";
 import SkeletonLoader from "@/components/loaders/SkeletonLoader";
 import { socket } from "@/socket/socket";
 import type { Conversation, UserSummary } from "@/lib/types";
+import SearchBar from "@/components/SearchBar";
 
 export default function ChatListPage() {
     const { userData } = useAppContext();
@@ -193,16 +194,13 @@ export default function ChatListPage() {
                         </p>
                     </div>
 
-                    <div className="relative mb-6">
-                        <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                            type="text"
-                            placeholder="Search chats..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="chat-search-input pl-11"
-                        />
-                    </div>
+                    <SearchBar
+                        placeholder="Search chats..."
+                        value={searchTerm}
+                        onChange={setSearchTerm}
+                        className="relative mb-6"
+                        inputClassName="chat-search-input pl-11"
+                    />
 
                 <div className="flex flex-col gap-3">
                     {loading ? (

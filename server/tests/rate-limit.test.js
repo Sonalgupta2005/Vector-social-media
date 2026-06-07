@@ -17,11 +17,13 @@ const rateLimitedUser = {
 const registerAndLogin = async (ip) => {
   await request(app)
     .post("/api/auth/register")
+    .set("Origin", "http://localhost:3000")
     .set("X-Forwarded-For", ip)
     .send(rateLimitedUser);
 
   const loginResponse = await request(app)
     .post("/api/auth/login")
+    .set("Origin", "http://localhost:3000")
     .set("X-Forwarded-For", ip)
     .send({
       username: rateLimitedUser.username,
@@ -88,6 +90,7 @@ describe("Rate limiting", () => {
     for (let i = 0; i < 10; i += 1) {
       response = await request(app)
         .post("/api/posts")
+        .set("Origin", "http://localhost:3000")
         .set("Cookie", cookie)
         .set("X-Forwarded-For", ip)
         .send({ intent: "ask" });
@@ -97,6 +100,7 @@ describe("Rate limiting", () => {
 
     response = await request(app)
       .post("/api/posts")
+      .set("Origin", "http://localhost:3000")
       .set("Cookie", cookie)
       .set("X-Forwarded-For", ip)
       .send({ intent: "ask" });

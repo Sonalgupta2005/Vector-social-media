@@ -55,3 +55,15 @@ export const followActionLimiter = createLimiter({
     max: 20,
     message: "Too many follow actions from this IP. Please try again later.",
 });
+
+export const reportRateLimiter = createLimiter({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    message: "Too many reports submitted. Please try again in an hour.",
+});
+
+export const conversationRateLimiter = createLimiter({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: "Too many conversation requests from this IP. Please try again later.",
+});
