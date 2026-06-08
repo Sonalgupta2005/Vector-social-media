@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import csrfProtection from "./middlewares/csrf.middleware.js";
+import { apiLimiter } from "./middlewares/rateLimit.middleware.js";
 import authRouter from "./routes/auth.routes.js";
 import postRouter from "./routes/post.routes.js";
 import userRoutes from "./routes/user.routes.js";
@@ -13,7 +14,7 @@ import conversationRouter from "./routes/conversation.routes.js";
 import reportRouter from "./routes/report.routes.js";
 import contactRouter from "./routes/contact.routes.js";
 import reviewRouter from "./routes/review.routes.js";
-
+import errorHandler from "./middlewares/error.middleware.js";
 const app = express();
 
 app.set("trust proxy", 1);
@@ -26,6 +27,7 @@ app.use(
       "http://localhost:3000",
       "http://vector-lac.vercel.app",
       "https://vector-lac.vercel.app",
+      "https://vector-social-media.vercel.app",
       process.env.FRONTEND_URL,
     ],
     credentials: true,
@@ -33,6 +35,8 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
+
+app.use("/api", apiLimiter);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -54,5 +58,7 @@ app.use("/api/conversation", conversationRouter);
 app.use("/api/reports", reportRouter);
 app.use("/api/contact", contactRouter);
 app.use("/api/reviews", reviewRouter);
+
+app.use(errorHandler);
 
 export default app;

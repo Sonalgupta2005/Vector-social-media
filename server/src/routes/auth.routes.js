@@ -40,6 +40,6 @@ authRouter.post("/forgot-password", authLimiter, forgotPassword);
 authRouter.post("/reset-password", authLimiter, resetPassword);
 
 //google auth
-authRouter.post("/google", googleAuth);
+authRouter.post("/google", registerLimiter, googleAuth);
 
 export default authRouter;

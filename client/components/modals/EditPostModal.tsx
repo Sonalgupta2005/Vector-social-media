@@ -32,7 +32,7 @@ export default function EditPostModal({
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL!;
   const MAX_CHARS = 1000;
-  const charsLeft = MAX_CHARS - content.length;
+  const charsLeft = MAX_CHARS - content.trim().length;
 
   const handleClose = () => {
     setVisible(false);

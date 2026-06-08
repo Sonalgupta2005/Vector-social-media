@@ -10,12 +10,16 @@ export const registerSchema = z.object({
     .min(1, { message: "Please enter your email!" })
     .email({ message: "Please enter a valid email!" }),
   phoneNumber: z.preprocess(
-    (value) => (typeof value === "string" ? value.replace(/\s+/g, "") : value),
+    (value) =>
+      typeof value === "string"
+        ? value.replace(/[\s\u00A0\-.()+]/g, "")
+        : value,
     z
       .string({ required_error: "Please enter your phone number!" })
       .min(1, { message: "Please enter your phone number!" })
       .refine((val) => validator.isMobilePhone(val, "any"), {
-        message: "Please enter a valid phone number!",
+        message:
+          "Please enter a valid phone number. International format (e.g. +919876543210) and local 10-digit numbers are accepted.",
       })
   ),
   password: z.string({ required_error: "Password must be at least 6 characters!" }).min(6, { message: "Password must be at least 6 characters!" }).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{6,}$/, {message:"Password must contain at least one uppercase letter, one lowercase letter, and one number!",}),

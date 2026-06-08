@@ -46,8 +46,19 @@ const postSchema = new mongoose.Schema({
     default: 0,
   },
 
+  sharedBy: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User"
+  }],
+
 }, { timestamps: true });
 
 postSchema.index({ content: "text", intent: "text" });
+
+postSchema.pre("save", function () {
+  if (typeof this.content === "string") {
+    this.content = this.content.trim();
+  }
+});
 
 export default mongoose.model("Post", postSchema);

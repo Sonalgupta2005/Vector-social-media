@@ -6,6 +6,7 @@ import axios from "axios";
 import { useAppContext } from "@/context/AppContext";
 import { useRouter } from "next/navigation";
 import { toast } from "react-toastify";
+import { getErrorMessage } from "@/lib/error";
 import {
   ArrowRight,
   Bell,
@@ -33,6 +34,7 @@ export default function NotificationPanel({ search = "" }: Props) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
   const [warningOpen, setWarningOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [followLoading, setFollowLoading] = useState<Record<string, boolean>>(
     {}
   );
@@ -107,13 +109,7 @@ export default function NotificationPanel({ search = "" }: Props) {
           return followStates;
         });
       } catch (err: unknown) {
-        if (axios.isAxiosError(err)) {
-          toast.error(
-            err.response?.data?.message || "Failed to fetch notifications"
-          );
-        } else {
-          toast.error("Failed to fetch notifications");
-        }
+        toast.error(getErrorMessage(err, "Failed to fetch notifications"));
       } finally {
         setLoading(false);
       }
@@ -132,11 +128,7 @@ export default function NotificationPanel({ search = "" }: Props) {
       setNotifications((prev) => prev.filter((n) => n._id !== id));
       toast.success("Notification deleted");
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        toast.error(err.response?.data?.message || "Delete failed");
-      } else {
-        toast.error("Delete failed");
-      }
+      toast.error(getErrorMessage(err, "Delete failed"));
     } finally {
       setDeleteLoading((prev) => ({ ...prev, [id]: false }));
     }
@@ -150,13 +142,26 @@ export default function NotificationPanel({ search = "" }: Props) {
       setNotifications([]);
       toast.success("All notifications cleared");
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        toast.error(err.response?.data?.message || "Delete all failed");
-      } else {
-        toast.error("Delete all failed");
-      }
+      toast.error(getErrorMessage(err, "Delete all failed"));
     }
   };
+
+  const markAsRead = useCallback(async (notificationId: string) => {
+    try {
+      await axios.put(
+        `${BACKEND_URL}/api/notifications/${notificationId}/read`,
+        {},
+        { withCredentials: true }
+      );
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n._id === notificationId ? { ...n, isRead: true } : n
+        )
+      );
+    } catch (err) {
+      console.error(err);
+    }
+  }, [BACKEND_URL]);
 
   const markAllAsRead = useCallback(async () => {
     try {
@@ -172,60 +177,56 @@ export default function NotificationPanel({ search = "" }: Props) {
     }
   }, [BACKEND_URL]);
 
-  const handleAcceptRequest = async (senderId: string) => {
-    try {
-      setFollowLoading((prev) => ({ ...prev, [senderId]: true }));
-      await axios.put(
-        `${BACKEND_URL}/api/users/${senderId}/accept-request`,
-        {},
-        { withCredentials: true }
-      );
-      toast.success("Follow request accepted");
-      setNotifications((prev) =>
-        prev.map((n) =>
-          n.sender?._id === senderId && n.type === "follow_request"
-            ? { ...n, type: "follow" as const }
-            : n
-        )
-      );
-      setSenderFollowState((prev) => ({
-        ...prev,
-        [senderId]: prev[senderId] || {
-          isFollowing: false,
-          isRequested: false,
-        },
-      }));
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        toast.error(err.response?.data?.message || "Action failed");
-      }
-    } finally {
-      setFollowLoading((prev) => ({ ...prev, [senderId]: false }));
-    }
-  };
+  // const handleAcceptRequest = async (senderId: string) => {
+  //   try {
+  //     setFollowLoading((prev) => ({ ...prev, [senderId]: true }));
+  //     await axios.put(
+  //       `${BACKEND_URL}/api/users/${senderId}/accept-request`,
+  //       {},
+  //       { withCredentials: true }
+  //     );
+  //     toast.success("Follow request accepted");
+  //     setNotifications((prev) =>
+  //       prev.map((n) =>
+  //         n.sender?._id === senderId && n.type === "follow_request"
+  //           ? { ...n, type: "follow" as const }
+  //           : n
+  //       )
+  //     );
+  //     setSenderFollowState((prev) => ({
+  //       ...prev,
+  //       [senderId]: prev[senderId] || {
+  //         isFollowing: false,
+  //         isRequested: false,
+  //       },
+  //     }));
+  //   } catch (err: unknown) {
+  //     toast.error(getErrorMessage(err, "Action failed"));
+  //   } finally {
+  //     setFollowLoading((prev) => ({ ...prev, [senderId]: false }));
+  //   }
+  // };
 
-  const handleRejectRequest = async (senderId: string) => {
-    try {
-      setFollowLoading((prev) => ({ ...prev, [senderId]: true }));
-      await axios.put(
-        `${BACKEND_URL}/api/users/${senderId}/reject-request`,
-        {},
-        { withCredentials: true }
-      );
-      toast.success("Follow request rejected");
-      setNotifications((prev) =>
-        prev.filter(
-          (n) => !(n.sender?._id === senderId && n.type === "follow_request")
-        )
-      );
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        toast.error(err.response?.data?.message || "Action failed");
-      }
-    } finally {
-      setFollowLoading((prev) => ({ ...prev, [senderId]: false }));
-    }
-  };
+  // const handleRejectRequest = async (senderId: string) => {
+  //   try {
+  //     setFollowLoading((prev) => ({ ...prev, [senderId]: true }));
+  //     await axios.put(
+  //       `${BACKEND_URL}/api/users/${senderId}/reject-request`,
+  //       {},
+  //       { withCredentials: true }
+  //     );
+  //     toast.success("Follow request rejected");
+  //     setNotifications((prev) =>
+  //       prev.filter(
+  //         (n) => !(n.sender?._id === senderId && n.type === "follow_request")
+  //       )
+  //     );
+  //   } catch (err: unknown) {
+  //     toast.error(getErrorMessage(err, "Action failed"));
+  //   } finally {
+  //     setFollowLoading((prev) => ({ ...prev, [senderId]: false }));
+  //   }
+  // };
 
   const handleReplyToMessage = async (
     notificationId: string,
@@ -247,11 +248,7 @@ export default function NotificationPanel({ search = "" }: Props) {
       );
       router.push(`/main/chat/${data._id}`);
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        toast.error(err.response?.data?.message || "Failed to open chat");
-      } else {
-        toast.error("Failed to open chat");
-      }
+      toast.error(getErrorMessage(err, "Failed to open chat"));
     } finally {
       setMessageLoading((prev) => ({ ...prev, [notificationId]: false }));
     }
@@ -287,14 +284,20 @@ export default function NotificationPanel({ search = "" }: Props) {
   }, [fetchNotifications, userData]);
 
   useEffect(() => {
-    if (!notifications.some((n) => !n.isRead)) return;
+    if (!userData) return;
 
-    const timeoutId = window.setTimeout(() => {
-      void markAllAsRead();
-    }, 0);
+    const handleNotificationRemoved = (data: { notificationId: string }) => {
+      setNotifications((prev) => prev.filter((n) => n._id !== data.notificationId));
+    };
 
-    return () => window.clearTimeout(timeoutId);
-  }, [markAllAsRead, notifications]);
+    socket.on("notification:removed", handleNotificationRemoved);
+    return () => {
+      socket.off("notification:removed", handleNotificationRemoved);
+    };
+  }, [userData]);
+
+
+
 
   if (!userData) return null;
 
@@ -385,12 +388,20 @@ export default function NotificationPanel({ search = "" }: Props) {
 
         <div className="flex gap-2">
           {notifications.length > 0 && (
-            <button
-              onClick={() => setWarningOpen(true)}
-              className="h-9 text-sm cursor-pointer w-[50%] md:w-25 py-1 bg-blue-600 text-white rounded-md"
-            >
-              Clear All
-            </button>
+            <>
+              <button
+                onClick={() => void markAllAsRead()}
+                className="h-9 text-sm cursor-pointer w-auto px-3 py-1 bg-secondary text-foreground rounded-md hover:bg-secondary/80 transition"
+              >
+                Mark all read
+              </button>
+              <button
+                onClick={() => setWarningOpen(true)}
+                className="h-9 text-sm cursor-pointer w-[50%] md:w-25 py-1 bg-blue-600 text-white rounded-md"
+              >
+                Clear All
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -463,6 +474,10 @@ export default function NotificationPanel({ search = "" }: Props) {
             >
               <div
                 onClick={() => {
+                  if (!n.isRead) {
+                    void markAsRead(n._id);
+                  }
+
                   if (n.type === "post_removed_reported" || n.type === "comment_removed_reported") return;
 
                   if (n.post?._id) {
@@ -481,21 +496,26 @@ export default function NotificationPanel({ search = "" }: Props) {
                 }}
                 className="flex gap-3 flex-1 cursor-pointer p-2 rounded-lg"
               >
-                {n.type === "post_removed_reported" || n.type === "comment_removed_reported" ? (
-                  <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center flex-shrink-0">
-                    <span className="text-red-500 text-lg">!</span>
-                  </div>
-                ) : (
-                  <Image
-                    alt={getSenderName(n)}
-                    src={getSenderAvatar(n)}
-                    width={40}
-                    height={40}
-                    className="h-10 w-10 rounded-full object-cover"
-                  />
-                )}
+                <div className="relative shrink-0">
+                  {!n.isRead && (
+                    <span className="absolute -top-0.5 -left-0.5 h-3 w-3 rounded-full bg-blue-500 border-2 border-background z-10" />
+                  )}
+                  {n.type === "post_removed_reported" || n.type === "comment_removed_reported" ? (
+                    <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                      <span className="text-red-500 text-lg">!</span>
+                    </div>
+                  ) : (
+                    <Image
+                      alt={getSenderName(n)}
+                      src={getSenderAvatar(n)}
+                      width={40}
+                      height={40}
+                      className="h-10 w-10 rounded-full object-cover"
+                    />
+                  )}
+                </div>
 
-                <div>
+                <div className={!n.isRead ? "font-semibold" : ""}>
                   <p className="text-foreground">
                     {n.type === "post_removed_reported" ? (
                       <span className="text-red-500 font-semibold">
