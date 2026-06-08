@@ -63,7 +63,12 @@ const postSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
+// Text index for searching posts by content and intent
 postSchema.index({ content: "text", intent: "text" });
+
+// Compound index for efficient cursor-based pagination on user profile posts
+// Used by getPostsByUser controller for O(log N) lookups instead of O(N) collection scans
+postSchema.index({ author: 1, _id: -1 });
 
 postSchema.pre("save", function () {
   if (typeof this.content === "string") {

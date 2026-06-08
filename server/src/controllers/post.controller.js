@@ -14,6 +14,10 @@ import asyncHandler from "../utils/asyncHandler.js";
 // Prevents callers from triggering full-collection scans with deep .populate() chains.
 const MAX_LIMIT = 50;
 
+// Maximum number of likes to show in preview (rest shown as count)
+// Prevents massive response payloads from posts with thousands of likes
+const MAX_LIKES_PREVIEW = 10;
+
 // --------------- Shared helpers for post listing ---------------
 
 const buildBlockExclusion = async (reqUser) => {
@@ -657,20 +661,67 @@ export const getPostsByUser = asyncHandler(async (req, res) => {
 
         const normalPosts = await Post.find(postFilter)
             .populate("author", "username name avatar")
-            .populate(likesPopulate)
             .sort({ _id: -1 })
-            .limit(limit);
+            .limit(limit)
+            .lean();
 
         const posts = [...pinnedPosts, ...normalPosts];
-        const hasMore = normalPosts.length === limit;
-        const nextCursor = hasMore ? normalPosts[normalPosts.length - 1]._id : null;
-        const postsWithMeta = addBookmarkMeta(posts, req.user);
+
+        // Fetch likes separately with optimization:
+        // - Limit to MAX_LIKES_PREVIEW full documents
+        // - Include total count for all likes
+        const postsWithLikes = await Promise.all(
+            posts.map(async (post) => {
+                // Get total count of likes
+                const totalLikesCount = post.likes.length;
+
+                // Filter out blocked users from likes array
+                let likesAfterBlocking = post.likes;
+                if (excludeUserIds.length) {
+                    likesAfterBlocking = post.likes.filter(
+                        (likeId) => !excludeUserIds.some((excludedId) => excludedId.toString() === likeId.toString())
+                    );
+                }
+
+                // Fetch only the preview set of likes (limited documents)
+                const likesPreview = await User.find(
+                    { _id: { $in: likesAfterBlocking.slice(0, MAX_LIKES_PREVIEW) } },
+                    "username name avatar _id"
+                ).lean();
+
+                return {
+                    ...post,
+                    likes: likesPreview,
+                    likesCount: likesAfterBlocking.length,
+                    likesPreviewCount: Math.min(likesAfterBlocking.length, MAX_LIKES_PREVIEW),
+                };
+            })
+        );
+
+        // Populate author field
+        const postsWithAuthor = await Promise.all(
+            postsWithLikes.map(async (post) => {
+                const author = await User.findById(post.author, "username name avatar").lean();
+                return { ...post, author };
+            })
+        );
+
+        const hasMore = posts.length === limit;
+        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
+        const userBookmarkSet = req.user?.bookmarks
+            ? new Set(req.user.bookmarks.map(String))
+            : new Set();
+        const postsWithMeta = postsWithAuthor.map((p) => ({
+            ...p,
+            isBookmarked: userBookmarkSet.has(p._id.toString()),
+        }));
+
         return res.status(200).json({
-        success: true,
-        posts: postsWithMeta,
-        hasMore,
-        nextCursor,
-        limit,
+            success: true,
+            posts: postsWithMeta,
+            hasMore,
+            nextCursor,
+            limit,
         });
    
 });
