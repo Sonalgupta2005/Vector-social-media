@@ -56,8 +56,8 @@ app.use(
         // Media sources: Self-hosted and HTTPS only
         mediaSrc: ["'self'", "https:"],
 
-        // WebSocket and fetch connections: Allow API calls to same-origin and HTTPS
-        connectSrc: ["'self'", "https://"],
+        // WebSocket and fetch connections: Allow API calls to same-origin and HTTPS origins
+        connectSrc: ["'self'", "https://cdn.jsdelivr.net", "https://apis.google.com"],
 
         // Framing: Disable embedding app in iframes (clickjacking prevention)
         frameSrc: ["'none'"],
