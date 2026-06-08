@@ -238,20 +238,20 @@ export default function ProfileLayout({ user, isFollowing, isRequested }: Profil
         ))}
       </div>
 
-      <div className="mt-8 ml-auto max-w-272">
+      <div className="mt-8 mx-auto max-w-272">
         {user.isBlockedByTarget ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center border-t border-dashed border-border/50">
+          <div className="flex flex-col items-center justify-center min-h-[40vh] text-center border-t border-dashed border-border/50">
             <Lock className="h-12 w-12 mb-3 opacity-30 text-foreground" />
             <h3 className="text-lg font-semibold text-foreground">This user is unavailable</h3>
           </div>
         ) : blocked ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center border-t border-dashed border-border/50">
+          <div className="flex flex-col items-center justify-center min-h-[40vh] text-center border-t border-dashed border-border/50">
             <Lock className="h-12 w-12 mb-3 opacity-30 text-foreground" />
             <h3 className="text-lg font-semibold text-foreground">You have blocked this user</h3>
             <p className="text-sm text-slate-700 dark:text-slate-300">Unblock them to see their posts and follow them.</p>
           </div>
         ) : !canSeeContent ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center border-t border-dashed border-border/50">
+          <div className="flex flex-col items-center justify-center min-h-[40vh] text-center border-t border-dashed border-border/50">
             <Lock className="h-12 w-12 mb-3 opacity-30 text-foreground" />
             <h3 className="text-lg font-semibold text-foreground">This account is private</h3>
             <p className="text-sm text-slate-700 dark:text-slate-300">Follow this account to see their posts and followers.</p>
