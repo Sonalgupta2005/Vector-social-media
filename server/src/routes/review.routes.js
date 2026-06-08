@@ -5,11 +5,11 @@ import {
   getReviews,
   getAverage,
 } from "../controllers/review.controller.js";
-import { postWriteLimiter } from "../middlewares/rateLimit.middleware.js";
+import { reviewWriteLimiter } from "../middlewares/rateLimit.middleware.js";
 
 const router = express.Router();
 
-router.post("/", authMiddleware, postWriteLimiter, createReview);
+router.post("/", authMiddleware, reviewWriteLimiter, createReview);
 router.get("/", getReviews);
 router.get("/average", getAverage);
 

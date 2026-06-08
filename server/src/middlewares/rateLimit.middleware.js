@@ -67,3 +67,14 @@ export const conversationRateLimiter = createLimiter({
     max: 10,
     message: "Too many conversation requests from this IP. Please try again later.",
 });
+export const notificationWriteLimiter = createLimiter({
+    windowMs: 60 * 1000,
+    max: 30,
+    message: "Too many notification requests from this IP. Please try again later.",
+});
+
+export const reviewWriteLimiter = createLimiter({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: "Too many review submissions from this IP. Please try again later.",
+});
