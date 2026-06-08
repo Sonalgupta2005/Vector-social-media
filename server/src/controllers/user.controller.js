@@ -276,21 +276,24 @@ export const toggleFollowUser = async (req, res) => {
                         type: notification.type,
                     });
                     return res.json({ requested: true, message: "Follow request sent" });
-                } else {
-                    await User.updateOne({ _id: currentUserId }, { $inc: { followingCount: 1 } });
-                    await User.updateOne({ _id: targetUserId }, { $inc: { followersCount: 1 } });
-                    const notification = await Notification.create({
-                        recipient: targetUser._id,
-                        sender: req.user._id,
-                        type: "follow",
-                    });
-                    getIO().to(targetUser._id.toString()).emit("notification:new", {
-                        notificationId: notification._id,
-                        type: notification.type,
-                    });
-                    return res.json({ followed: true });
-                }
             }
+            await User.updateOne({ _id: currentUserId }, { $inc: { followingCount: 1 } });
+            await User.updateOne({ _id: targetUserId }, { $inc: { followersCount: 1 } });
+            const notification = await Notification.create({
+                recipient: targetUser._id,
+                sender: req.user._id,
+                type: "follow",
+            });
+            getIO().to(targetUser._id.toString()).emit("notification:new", {
+                notificationId: notification._id,
+                type: notification.type,
+            });
+            return res.json({ followed: true });
+        }
+        // Follow already existed from concurrent request — return based on actual status
+        if (result.value?.status === "pending") {
+            return res.json({ requested: true, message: "Follow request sent" });
+        }
             return res.json({ followed: true });
         }
     } catch (error) {
