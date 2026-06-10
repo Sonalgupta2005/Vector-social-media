@@ -296,6 +296,19 @@ export default function NotificationPanel({ search = "" }: Props) {
     };
   }, [userData]);
 
+  useEffect(() => {
+    if (!userData) return;
+
+    const handleNotificationsCleared = (data: { conversationId: string }) => {
+      setNotifications((prev) => prev.filter((n) => n.conversation?._id !== data.conversationId));
+    };
+
+    socket.on("notifications:cleared", handleNotificationsCleared);
+    return () => {
+      socket.off("notifications:cleared", handleNotificationsCleared);
+    };
+  }, [userData]);
+
 
 
 
