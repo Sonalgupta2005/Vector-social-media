@@ -556,7 +556,7 @@ export default function NotificationPanel({ search = "" }: Props) {
                           void handleReplyToMessage(
                             n._id,
                             senderId,
-                            n.conversation._id
+                            n.conversation?._id
                           );
                         }
                       }}
