@@ -1,5 +1,6 @@
 import Conversation from "../models/conversation.model.js";
 import Message from "../models/message.model.js";
+import Notification from "../models/notification.model.js";
 import User from "../models/user.model.js";
 import { getIO } from "../socket/socket.js";
 import asyncHandler from "../utils/asyncHandler.js";
