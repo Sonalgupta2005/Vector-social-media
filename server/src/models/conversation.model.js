@@ -24,4 +24,15 @@ const conversationSchema = new mongoose.Schema(
 
 conversationSchema.index({ participantsKey: 1 }, { unique: true, sparse: true });
 
+conversationSchema.pre("deleteOne", { document: false, query: true }, function (next) {
+  const convoId = this.getFilter()._id;
+  if (convoId) {
+    mongoose.model("Notification").deleteMany({ conversation: convoId, type: "message" })
+      .then(() => next())
+      .catch(next);
+  } else {
+    next();
+  }
+});
+
 export default mongoose.model("Conversation", conversationSchema);
