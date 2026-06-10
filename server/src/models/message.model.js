@@ -16,8 +16,15 @@ const messageSchema = new mongoose.Schema(
 
     content: {
       type: String,
-      required: true,
       maxlength: [2000, "Message must be 2000 characters or fewer"],
+    },
+
+    image: {
+      type: String,
+    },
+
+    imagePublicId: {
+      type: String,
     },
 
     isDeleted: {

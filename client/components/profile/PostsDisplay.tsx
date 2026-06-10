@@ -107,7 +107,28 @@ export default function PostsDisplay({
           key={post._id}
           className="rounded-2xl transition-all duration-200"
         >
-          <PostCard post={post} />
+          <PostCard
+            post={post}
+            setPost={(action) => {
+              if (typeof action === "function") {
+                setPosts((prev) => {
+                  const updatedPosts = prev.map((p) =>
+                    p._id === post._id ? (action(p) as Post) : p
+                  );
+                  return [...updatedPosts].sort((a, b) => {
+                    const pinA = a.isPinned ? 1 : 0;
+                    const pinB = b.isPinned ? 1 : 0;
+                    if (pinA !== pinB) {
+                      return pinB - pinA;
+                    }
+                    return b._id.localeCompare(a._id);
+                  });
+                });
+              } else if (action === null) {
+                setPosts((prev) => prev.filter((p) => p._id !== post._id));
+              }
+            }}
+          />
         </div>
       ))}
 

@@ -12,7 +12,8 @@ import {
     incrementShare,
     updatePost,toggleBookmark,
     getBookmarks,
-    searchPosts
+    searchPosts,
+    togglePinPost
 } from "../controllers/post.controller.js";
 import authMiddleware from "../middlewares/auth.middleware.js";
 import { uploadImage } from "../middlewares/upload.middleware.js";
@@ -35,5 +36,6 @@ postRouter.put("/:id/share", authMiddleware, socialActionLimiter, incrementShare
 postRouter.put("/:id", authMiddleware, postWriteLimiter, uploadImage("image"), updatePost);
 postRouter.delete("/:id", authMiddleware, postWriteLimiter, deletePost);
 postRouter.post("/:id/bookmark", authMiddleware, socialActionLimiter, toggleBookmark);
+postRouter.post("/:id/pin", authMiddleware, socialActionLimiter, togglePinPost);
 
 export default postRouter;

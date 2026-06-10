@@ -51,6 +51,7 @@ export type Post = {
   sharesCount?: number;
   createdAt: string;
   isBookmarked?: boolean;
+  isPinned?: boolean;
 };
 
 export type Comment = {
@@ -75,6 +76,8 @@ export type Message = {
   _id: string;
   sender: UserSummary;
   content: string;
+  image?: string;
+  imagePublicId?: string;
 
   isDeleted?: boolean;
   deletedAt?: string | null;

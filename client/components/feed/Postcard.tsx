@@ -3,7 +3,7 @@
 import { useAppContext } from "@/context/AppContext";
 import axios from "axios";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck , Heart, MessageCircle, HelpCircle, Hammer, Share2, MessagesSquare, MoreHorizontal, Trash2, Flag, Forward, Pencil } from "lucide-react";
+import { Bookmark, BookmarkCheck , Heart, MessageCircle, HelpCircle, Hammer, Share2, MessagesSquare, MoreHorizontal, Trash2, Flag, Forward, Pencil, Pin } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "react-toastify";
@@ -367,9 +367,45 @@ export default function PostCard({ post, setPost }: PostCardProps) {
         setBookmarkLoading(false);
         }
     };
+    const handlePin = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!userData?.id) {
+            toast.error("User not authenticated");
+            return;
+        }
+        try {
+            const res = await axios.post(
+                `${BACKEND_URL}/api/posts/${post._id}/pin`,
+                {},
+                { withCredentials: true }
+            );
+            const { isPinned: serverPinned } = res.data;
+            if (setPost) {
+                setPost((prev) => prev ? { ...prev, isPinned: serverPinned } : prev);
+            } else {
+                setPosts((prev) =>
+                    prev.map((p) => (p._id === post._id ? { ...p, isPinned: serverPinned } : p))
+                );
+            }
+            toast.success(res.data.message || (serverPinned ? "Post pinned" : "Post unpinned"));
+            setMenuOpen(false);
+        } catch (error) {
+            if (axios.isAxiosError(error) && error.response?.data?.message) {
+                toast.error(error.response.data.message);
+            } else {
+                toast.error("Failed to pin/unpin post");
+            }
+        }
+    };
     return (
         <div className="content-card glass-hover relative overflow-clip cursor-pointer"
             onClick={openPost}>
+            {post.isPinned && (
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2.5">
+                    <Pin size={14} className="rotate-[45deg] fill-current" />
+                    Pinned Post
+                </div>
+            )}
             <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center flex-wrap sm:justify-between w-[90%]">
                     <div className="flex items-center gap-2">
@@ -422,6 +458,14 @@ setShowReportModal(true);
 > <Flag size={14} />
 Report post </button>
 )}
+
+                            {isOwner && (
+                                <button className="w-full cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-black/3 dark:hover:bg-white/5"
+                                    onClick={handlePin}>
+                                    <Pin size={14} />
+                                    {post.isPinned ? "Unpin post" : "Pin post"}
+                                </button>
+                            )}
 
                             {isOwner && (
                                 <button className="w-full cursor-pointer flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-black/3 dark:hover:bg-white/5"

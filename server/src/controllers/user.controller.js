@@ -167,6 +167,10 @@ export const updateProfile = asyncHandler(async (req, res) => {
                 });
             }
             if (isPrivate === false && user.isPrivate === true) {
+                const pendingFollows = await Follow.find(
+                    { following: userId, status: "pending" }
+                ).lean();
+
                 const result = await Follow.updateMany(
                     { following: userId, status: "pending" },
                     { $set: { status: "accepted" } }
@@ -176,6 +180,22 @@ export const updateProfile = asyncHandler(async (req, res) => {
                         { _id: userId },
                         { $inc: { followersCount: result.modifiedCount } }
                     );
+
+                    const notifications = await Notification.insertMany(
+                        pendingFollows.map(f => ({
+                            recipient: f.follower,
+                            sender: userId,
+                            type: "follow_request_accepted",
+                        }))
+                    );
+
+                    const io = getIO();
+                    for (const notification of notifications) {
+                        io.to(notification.recipient.toString()).emit("notification:new", {
+                            notificationId: notification._id,
+                            type: notification.type,
+                        });
+                    }
                 }
             }
             if (user.isPrivate !== isPrivate) {
@@ -250,23 +270,28 @@ export const toggleFollowUser = async (req, res) => {
             }
             return res.json({ requested: false, message: "Follow request cancelled" });
         } else {
-            // New follow: re-read isPrivate fresh to avoid a race with updateProfile
-            // toggling the account from private to public between the initial fetch
-            // and the upsert below.
-            const targetUserNow = await User.findById(targetUserId).select("isPrivate").lean();
+            // New follow: upsert with "accepted" as default, then downgrade
+            // to "pending" if the target account is currently private. This
+            // eliminates the race with updateProfile toggling isPrivate
+            // between the isPrivate read and the upsert.
             const result = await Follow.findOneAndUpdate(
                 { follower: currentUserId, following: targetUserId },
                 {
                     $setOnInsert: {
                         follower: currentUserId,
                         following: targetUserId,
-                        status: targetUserNow.isPrivate ? "pending" : "accepted",
+                        status: "accepted",
                     },
                 },
                 { upsert: true, returnDocument: 'after', includeResultMetadata: true }
             );
             if (result.lastErrorObject?.upserted) {
+                const targetUserNow = await User.findById(targetUserId).select("isPrivate").lean();
                 if (targetUserNow.isPrivate) {
+                    await Follow.findOneAndUpdate(
+                        { _id: result.value._id, status: "accepted" },
+                        { $set: { status: "pending" } }
+                    );
                     const notification = await Notification.create({
                         recipient: targetUser._id,
                         sender: req.user._id,
@@ -277,24 +302,24 @@ export const toggleFollowUser = async (req, res) => {
                         type: notification.type,
                     });
                     return res.json({ requested: true, message: "Follow request sent" });
+                }
+                await User.updateOne({ _id: currentUserId }, { $inc: { followingCount: 1 } });
+                await User.updateOne({ _id: targetUserId }, { $inc: { followersCount: 1 } });
+                const notification = await Notification.create({
+                    recipient: targetUser._id,
+                    sender: req.user._id,
+                    type: "follow",
+                });
+                getIO().to(targetUser._id.toString()).emit("notification:new", {
+                    notificationId: notification._id,
+                    type: notification.type,
+                });
+                return res.json({ followed: true });
             }
-            await User.updateOne({ _id: currentUserId }, { $inc: { followingCount: 1 } });
-            await User.updateOne({ _id: targetUserId }, { $inc: { followersCount: 1 } });
-            const notification = await Notification.create({
-                recipient: targetUser._id,
-                sender: req.user._id,
-                type: "follow",
-            });
-            getIO().to(targetUser._id.toString()).emit("notification:new", {
-                notificationId: notification._id,
-                type: notification.type,
-            });
-            return res.json({ followed: true });
-        }
-        // Follow already existed from concurrent request — return based on actual status
-        if (result.value?.status === "pending") {
-            return res.json({ requested: true, message: "Follow request sent" });
-        }
+            // Follow already existed from concurrent request — return based on actual status
+            if (result.value?.status === "pending") {
+                return res.json({ requested: true, message: "Follow request sent" });
+            }
             return res.json({ followed: true });
         }
     } catch (error) {

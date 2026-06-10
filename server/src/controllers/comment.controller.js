@@ -211,6 +211,7 @@ export const deleteComment = asyncHandler(async (req, res) => {
     }
 
     const session = await mongoose.startSession();
+    let deletedNotifications = [];
     try {
         await session.withTransaction(async () => {
             const replies = await Comment.find({ parentCommentId: comment._id }).select("_id").session(session);
@@ -224,6 +225,12 @@ export const deleteComment = asyncHandler(async (req, res) => {
         });
     } finally {
         await session.endSession();
+    }
+
+    for (const notif of deletedNotifications) {
+        getIO().to(notif.recipient.toString()).emit("notification:removed", {
+            notificationId: notif._id,
+        });
     }
 
     res.json({ success: true });
