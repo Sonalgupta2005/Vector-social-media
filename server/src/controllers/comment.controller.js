@@ -171,8 +171,10 @@ export const deleteComment = asyncHandler(async (req, res) => {
     }
 
     const session = await mongoose.startSession();
+    let deletedNotifications = [];
     try {
         await session.withTransaction(async () => {
+            deletedNotifications = await Notification.find({ comment: comment._id }).session(session);
             await comment.deleteOne({ session });
             await Report.deleteMany({ targetType: "comment", targetId: comment._id }, { session });
             await Notification.deleteMany({ comment: comment._id }, { session });
@@ -180,6 +182,12 @@ export const deleteComment = asyncHandler(async (req, res) => {
         });
     } finally {
         await session.endSession();
+    }
+
+    for (const notif of deletedNotifications) {
+        getIO().to(notif.recipient.toString()).emit("notification:removed", {
+            notificationId: notif._id,
+        });
     }
 
     res.json({ success: true });

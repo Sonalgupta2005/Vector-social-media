@@ -558,7 +558,18 @@ export const unlikePost = asyncHandler(async (req, res) => {
     const unliked = result.modifiedCount > 0;
 
     if (unliked) {
-        await Notification.deleteOne({ recipient: post.author, sender: userId, type: "like", post: postId });
+        const deletedNotification = await Notification.findOneAndDelete({
+            recipient: post.author,
+            sender: userId,
+            type: "like",
+            post: postId,
+        });
+
+        if (deletedNotification) {
+            getIO().to(post.author.toString()).emit("notification:removed", {
+                notificationId: deletedNotification._id,
+            });
+        }
     }
 
     const updatedPost = await Post.findById(postId).select("likes");
