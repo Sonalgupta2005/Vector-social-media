@@ -13,17 +13,35 @@ const MAX_LIMIT = 50;
 
 export const addComment = asyncHandler(async (req, res) => {
         const { postId } = req.params;
-        const parsed = commentSchema.safeParse({ post: postId, content: req.body.content });
+        const parsed = commentSchema.safeParse({
+            post: postId,
+            content: req.body.content,
+            parentCommentId: req.body.parentCommentId
+        });
         if (!parsed.success) {
             return res.status(400).json({
                 message: parsed.error.issues[0]?.message ?? "Invalid request",
             });
         }
-        const { content } = parsed.data;
+        const { content, parentCommentId } = parsed.data;
         const post = await Post.findById(postId);
         if (!post) {
             return res.status(404).json({ message: "Post not found" });
         }
+
+        let resolvedParentId = null;
+        if (parentCommentId) {
+            const parentComment = await Comment.findById(parentCommentId);
+            if (!parentComment) {
+                return res.status(404).json({ message: "Parent comment not found" });
+            }
+            if (parentComment.post.toString() !== postId) {
+                return res.status(400).json({ message: "Parent comment does not belong to this post" });
+            }
+            // Enforce a 2-level comment hierarchy
+            resolvedParentId = parentComment.parentCommentId || parentComment._id;
+        }
+
         const authorUser = await User.findById(post.author);
         if (req.user) {
             const currentUserId = req.user.id;
@@ -66,7 +84,8 @@ export const addComment = asyncHandler(async (req, res) => {
         const comment = await Comment.create({
             post: postId,
             author: req.user.id,
-            content
+            content,
+            parentCommentId: resolvedParentId
         });
         await Post.findByIdAndUpdate(postId, {
             $inc: { commentsCount: 1 },
@@ -132,6 +151,7 @@ export const getPostComments = asyncHandler(async (req, res) => {
 
         let filter = {
             post: postId,
+            parentCommentId: { $in: [null, undefined] },
             isFlaggedForReview: { $ne: true },
             ...(excludeUserIds.length ? { author: { $nin: excludeUserIds } } : {}),
         };
@@ -149,10 +169,30 @@ export const getPostComments = asyncHandler(async (req, res) => {
             .limit(limit)
             .populate("author", "username name avatar");
 
+        const topLevelIds = comments.map(c => c._id);
+        let replies = [];
+        if (topLevelIds.length > 0) {
+            replies = await Comment.find({
+                parentCommentId: { $in: topLevelIds },
+                isFlaggedForReview: { $ne: true },
+                ...(excludeUserIds.length ? { author: { $nin: excludeUserIds } } : {}),
+            })
+            .sort({ _id: 1 })
+            .populate("author", "username name avatar");
+        }
+
+        const commentsWithReplies = comments.map(comment => {
+            const commentObj = comment.toObject();
+            commentObj.replies = replies.filter(
+                reply => reply.parentCommentId && reply.parentCommentId.toString() === comment._id.toString()
+            );
+            return commentObj;
+        });
+
         const hasMore = comments.length === limit;
         const nextCursor = hasMore ? comments[comments.length - 1]._id : null;
 
-        res.json({ comments, nextCursor, hasMore });
+        res.json({ comments: commentsWithReplies, nextCursor, hasMore });
 });
 
 export const deleteComment = asyncHandler(async (req, res) => {
@@ -171,15 +211,26 @@ export const deleteComment = asyncHandler(async (req, res) => {
     }
 
     const session = await mongoose.startSession();
+    let deletedNotifications = [];
     try {
         await session.withTransaction(async () => {
-            await comment.deleteOne({ session });
-            await Report.deleteMany({ targetType: "comment", targetId: comment._id }, { session });
-            await Notification.deleteMany({ comment: comment._id }, { session });
-            await Post.findByIdAndUpdate(comment.post, { $inc: { commentsCount: -1 } }, { session });
+            const replies = await Comment.find({ parentCommentId: comment._id }).select("_id").session(session);
+            const replyIds = replies.map(r => r._id);
+            const allCommentIds = [comment._id, ...replyIds];
+
+            await Comment.deleteMany({ _id: { $in: allCommentIds } }, { session });
+            await Report.deleteMany({ targetType: "comment", targetId: { $in: allCommentIds } }, { session });
+            await Notification.deleteMany({ comment: { $in: allCommentIds } }, { session });
+            await Post.findByIdAndUpdate(comment.post, { $inc: { commentsCount: -allCommentIds.length } }, { session });
         });
     } finally {
         await session.endSession();
+    }
+
+    for (const notif of deletedNotifications) {
+        getIO().to(notif.recipient.toString()).emit("notification:removed", {
+            notificationId: notif._id,
+        });
     }
 
     res.json({ success: true });

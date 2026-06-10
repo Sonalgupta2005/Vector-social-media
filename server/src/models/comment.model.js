@@ -22,6 +22,11 @@ const commentSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    parentCommentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Comment",
+      default: null,
+    },
   },
   { timestamps: true }
 );

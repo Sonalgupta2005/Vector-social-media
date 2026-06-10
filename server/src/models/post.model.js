@@ -56,6 +56,11 @@ const postSchema = new mongoose.Schema({
     default: false,
   },
 
+  isPinned: {
+    type: Boolean,
+    default: false,
+  },
+
 }, { timestamps: true });
 
 postSchema.index({ content: "text", intent: "text" });

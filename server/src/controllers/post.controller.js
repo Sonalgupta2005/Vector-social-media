@@ -558,7 +558,18 @@ export const unlikePost = asyncHandler(async (req, res) => {
     const unliked = result.modifiedCount > 0;
 
     if (unliked) {
-        await Notification.deleteOne({ recipient: post.author, sender: userId, type: "like", post: postId });
+        const deletedNotification = await Notification.findOneAndDelete({
+            recipient: post.author,
+            sender: userId,
+            type: "like",
+            post: postId,
+        });
+
+        if (deletedNotification) {
+            getIO().to(post.author.toString()).emit("notification:removed", {
+                notificationId: deletedNotification._id,
+            });
+        }
     }
 
     const updatedPost = await Post.findById(postId).select("likes");
@@ -625,7 +636,17 @@ export const getPostsByUser = asyncHandler(async (req, res) => {
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
-        let postFilter = { author: userId, isFlaggedForReview: { $ne: true } };
+        const likesPopulate = getLikesPopulate(excludeUserIds);
+
+        let pinnedPosts = [];
+        if (!cursor) {
+            pinnedPosts = await Post.find({ author: userId, isPinned: true, isFlaggedForReview: { $ne: true } })
+                .populate("author", "username name avatar")
+                .populate(likesPopulate)
+                .sort({ _id: -1 });
+        }
+
+        let postFilter = { author: userId, isPinned: { $ne: true }, isFlaggedForReview: { $ne: true } };
         if (cursor) {
             if (mongoose.Types.ObjectId.isValid(cursor)) {
                 postFilter._id = { $lt: cursor };
@@ -634,24 +655,16 @@ export const getPostsByUser = asyncHandler(async (req, res) => {
             }
         }
 
-        const posts = await Post.find(postFilter)
+        const normalPosts = await Post.find(postFilter)
             .populate("author", "username name avatar")
-            .populate(
-                excludeUserIds.length
-                    ? { path: "likes", select: "username name avatar _id", match: { _id: { $nin: excludeUserIds } } }
-                    : { path: "likes", select: "username name avatar _id" }
-            )
+            .populate(likesPopulate)
             .sort({ _id: -1 })
             .limit(limit);
-        const hasMore = posts.length === limit;
-        const nextCursor = hasMore ? posts[posts.length - 1]._id : null;
-        const userBookmarkSet = req.user?.bookmarks
-        ? new Set(req.user.bookmarks.map(String))
-        : new Set();
-        const postsWithMeta = posts.map((p) => ({
-        ...p.toObject(),
-        isBookmarked: userBookmarkSet.has(p._id.toString()),
-        }));
+
+        const posts = [...pinnedPosts, ...normalPosts];
+        const hasMore = normalPosts.length === limit;
+        const nextCursor = hasMore ? normalPosts[normalPosts.length - 1]._id : null;
+        const postsWithMeta = addBookmarkMeta(posts, req.user);
         return res.status(200).json({
         success: true,
         posts: postsWithMeta,
@@ -897,4 +910,38 @@ export const getBookmarks = asyncHandler(async (req, res) => {
       : null;
     res.json({ posts: postsWithMeta, nextCursor });
  
+});
+
+export const togglePinPost = asyncHandler(async (req, res) => {
+  const postId = req.params.id;
+  const userId = req.user.id || req.user._id;
+
+  if (!mongoose.Types.ObjectId.isValid(postId)) {
+    return res.status(400).json({ success: false, message: "Invalid post ID format" });
+  }
+
+  const post = await Post.findById(postId);
+  if (!post) {
+    return res.status(404).json({ success: false, message: "Post not found" });
+  }
+
+  // Only allow author of post to pin/unpin it
+  if (post.author.toString() !== userId.toString()) {
+    return res.status(403).json({ success: false, message: "You are not allowed to pin this post" });
+  }
+
+  if (post.isPinned) {
+    post.isPinned = false;
+    await post.save();
+    return res.status(200).json({ success: true, isPinned: false, message: "Post unpinned successfully" });
+  } else {
+    // Limit to 3 pinned posts
+    const pinnedCount = await Post.countDocuments({ author: userId, isPinned: true });
+    if (pinnedCount >= 3) {
+      return res.status(400).json({ success: false, message: "You can only pin up to 3 posts" });
+    }
+    post.isPinned = true;
+    await post.save();
+    return res.status(200).json({ success: true, isPinned: true, message: "Post pinned successfully" });
+  }
 });
