@@ -73,6 +73,8 @@ export type Message = {
   _id: string;
   sender: UserSummary;
   content: string;
+  image?: string;
+  imagePublicId?: string;
 
   isDeleted?: boolean;
   deletedAt?: string | null;
