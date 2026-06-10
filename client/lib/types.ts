@@ -59,6 +59,8 @@ export type Comment = {
   author?: UserSummary;
   content: string;
   createdAt: string;
+  parentCommentId?: string;
+  replies?: Comment[];
 };
 
 export type Conversation = {
