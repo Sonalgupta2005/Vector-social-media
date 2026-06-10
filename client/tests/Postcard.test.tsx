@@ -131,7 +131,7 @@ describe("PostCard Image Loading Behavior", () => {
       vi.useRealTimers();
     });
 
-    it("should fallback to failure state when image load stalls and times out (8 seconds)", () => {
+    it("should not fallback to failure state when image load stalls and times out (8 seconds) but instead maintain skeleton", () => {
       render(<PostCard post={mockPost} />);
 
       // Initially skeleton is shown
@@ -143,11 +143,11 @@ describe("PostCard Image Loading Behavior", () => {
         vi.advanceTimersByTime(8000);
       });
 
-      // Skeleton should be removed after timeout triggers
-      expect(screen.queryByLabelText("Loading content")).not.toBeInTheDocument();
+      // Skeleton should REMAIN after timeout triggers because it's a slow load
+      expect(screen.getByLabelText("Loading content")).toBeInTheDocument();
 
-      // Fallback UI should be shown
-      expect(screen.getByText("Failed to load image")).toBeInTheDocument();
+      // Fallback UI should NOT be shown
+      expect(screen.queryByText("Failed to load image")).not.toBeInTheDocument();
     });
   });
 });
