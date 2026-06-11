@@ -172,7 +172,9 @@ export const sendMessage = asyncHandler(async (req, res) => {
         if (nowBlocked) {
           await Message.findByIdAndDelete(message._id);
           if (imagePublicId) {
-            await cloudinary.uploader.destroy(imagePublicId).catch(() => {});
+            await cloudinary.uploader.destroy(imagePublicId).catch((error) => {
+              console.error("Cloudinary cleanup failed:", error);
+            });
           }
           return res.status(403).json({ message: "Action forbidden due to block status" });
         }
@@ -193,7 +195,9 @@ export const sendMessage = asyncHandler(async (req, res) => {
       if (!updatedConversation) {
         await Message.findByIdAndDelete(message._id);
         if (imagePublicId) {
-          await cloudinary.uploader.destroy(imagePublicId).catch(() => {});
+          await cloudinary.uploader.destroy(imagePublicId).catch((error) => {
+            console.error("Cloudinary cleanup failed:", error);
+          });
         }
         return res.status(404).json({ message: "Conversation deleted during send" });
       }
@@ -234,7 +238,9 @@ export const sendMessage = asyncHandler(async (req, res) => {
     } catch (error) {
       await cleanupTempUpload(req.file);
       if (imagePublicId) {
-        await cloudinary.uploader.destroy(imagePublicId).catch(() => {});
+        await cloudinary.uploader.destroy(imagePublicId).catch((error) => {
+          console.error("Cloudinary cleanup failed:", error);
+        });
       }
       return res.status(error.statusCode || 500).json({
         message: error.message || "Something went wrong"
