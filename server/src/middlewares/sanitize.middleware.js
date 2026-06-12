@@ -51,6 +51,7 @@ export const sanitizeText = (value, maxLength = 10000) => {
   cleaned = DOMPurify.sanitize(cleaned, purifyConfig);
 
   // Third pass: Remove any remaining control characters
+  // eslint-disable-next-line no-control-regex
   cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, "");
 
   // Trim and enforce max length
