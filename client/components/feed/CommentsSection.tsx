@@ -33,6 +33,7 @@ export default function CommentsSection({ postId, postAuthorId }: { postId: stri
     const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
     const [cursor, setCursor] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(true);
+    const [replyingTo, setReplyingTo] = useState<Comment | null>(null);
     const LIMIT = 20;
 
     function timeAgo(dateString: string) {
@@ -92,8 +93,25 @@ export default function CommentsSection({ postId, postAuthorId }: { postId: stri
     const handlePost = async () => {
         try {
             setButtonLoading(true);
-            const { data } = await axios.post(`${BACKEND_URL}/api/comments/${postId}`, { content: text }, { withCredentials: true });
-            setComments(prev => [data, ...prev]);
+            const payload = {
+                content: text,
+                parentCommentId: replyingTo ? replyingTo._id : undefined
+            };
+            const { data } = await axios.post(`${BACKEND_URL}/api/comments/${postId}`, payload, { withCredentials: true });
+            if (replyingTo) {
+                setComments(prev => prev.map(c => {
+                    if (c._id === replyingTo._id) {
+                        return {
+                            ...c,
+                            replies: [...(c.replies || []), data]
+                        };
+                    }
+                    return c;
+                }));
+                setReplyingTo(null);
+            } else {
+                setComments(prev => [data, ...prev]);
+            }
             setText("");
         } catch (error: unknown) {
             toast.error(getErrorMessage(error, "Failed to post comment"));
@@ -115,7 +133,19 @@ export default function CommentsSection({ postId, postAuthorId }: { postId: stri
         if (!selectedComment) return;
         try {
             await axios.delete(`${BACKEND_URL}/api/comments/${selectedComment._id}`, { withCredentials: true });
-            setComments(prev => prev.filter(c => c._id !== selectedComment._id));
+            if (selectedComment.parentCommentId) {
+                setComments(prev => prev.map(c => {
+                    if (c._id === selectedComment.parentCommentId) {
+                        return {
+                            ...c,
+                            replies: (c.replies || []).filter(r => r._id !== selectedComment._id)
+                        };
+                    }
+                    return c;
+                }));
+            } else {
+                setComments(prev => prev.filter(c => c._id !== selectedComment._id));
+            }
             toast.success("Comment deleted");
         } catch (error: unknown) {
             toast.error(getErrorMessage(error, "Failed to delete comment"));
@@ -152,108 +182,169 @@ export default function CommentsSection({ postId, postAuthorId }: { postId: stri
         );
     }
 
+    const renderCommentCard = (c: Comment, parentComment?: Comment) => {
+        const isCommentAuthor =
+            String(c.author?._id) === String(userData?._id);
+        const isPostAuthor =
+            postAuthorId && String(postAuthorId) === String(userData?._id);
+        const canDelete = isCommentAuthor || isPostAuthor;
+
+        return (
+            <div className="flex gap-3 py-3 px-2 rounded-lg border-b border-border/50 last:border-b-0">
+                <Image alt={c.author?.name || "Comment author"} src={c.author?.avatar || "/default-avatar.png"} width={36} height={36} className="h-8 w-8 md:h-9 md:w-9 object-cover rounded-full shrink-0" />
+
+                <div className="flex flex-col w-full">
+
+                    <div className="flex items-center gap-2">
+                        <p
+                            className="cursor-pointer text-[0.9rem] font-semibold text-foreground"
+                            onClick={() =>
+                                router.push(`/main/user/${c.author?.username}`)
+                            }
+                        >
+                            {c.author?.name}
+                        </p>
+
+                        <div className="ml-auto relative">
+                            <button
+                                type="button"
+                                className="surface-text-muted cursor-pointer"
+                                onClick={() => {
+                                    setMenuOpenId((prev) => (prev === c._id ? null : c._id));
+                                }}
+                            >
+                                <MoreHorizontal size={16} />
+                            </button>
+
+                            {menuOpenId === c._id && (
+                                <div className="absolute right-0 top-6 z-20 w-36 overflow-hidden rounded-md border border-black/10 bg-white shadow-lg dark:border-white/10 dark:bg-blue-950">
+                                    {!isCommentAuthor && (
+                                        <button
+                                            type="button"
+                                            className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
+                                            onClick={() => {
+                                                setSelectedComment(c);
+                                                setShowReportModal(true);
+                                                setMenuOpenId(null);
+                                            }}
+                                        >
+                                            <Flag size={14} />
+                                            Report comment
+                                        </button>
+                                    )}
+
+                                    {canDelete && (
+                                        <button
+                                            type="button"
+                                            className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
+                                            onClick={() => {
+                                                setSelectedComment(c);
+                                                setShowDeleteModal(true);
+                                                setMenuOpenId(null);
+                                            }}
+                                        >
+                                            <Trash2 size={14} />
+                                            Delete comment
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="surface-text-muted text-[0.9rem] whitespace-pre-wrap wrap-break-word">
+                        <Linkify text={c?.content || ""} />
+                    </div>
+
+                    <div className="flex items-center gap-4 mt-1">
+                        <p className="text-[0.75rem] text-gray-500">
+                            {timeAgo(c.createdAt)}
+                        </p>
+                        {userData && (
+                            <button
+                                type="button"
+                                className="text-[0.75rem] font-semibold text-blue-500 cursor-pointer hover:underline"
+                                onClick={() => {
+                                    setReplyingTo(parentComment || c);
+                                    if (parentComment) {
+                                        setText(`@${c.author?.username} `);
+                                    }
+                                }}
+                            >
+                                Reply
+                            </button>
+                        )}
+                    </div>
+
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="mt-3 rounded-b-xl px-3 pt-4 pb-5 md:px-5">
             <p className="text-[0.8rem] font-semibold uppercase tracking-wide surface-text-muted mb-4">
                 Comments {comments.length > 0 && `· ${comments.length}`}
             </p>
             {userData && (
-                <div className="flex gap-2 mb-5">
-                    <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={handleKeyDown} placeholder="Write a comment.." className="form-textarea mt-0 flex-1" rows={2} />
-                    <button disabled={!text.trim() || buttonLoading} onClick={handlePost} className="w-20 md:w-25 h-9 md:h-10 cursor-pointer bg-blue-500 text-white text-sm font-medium rounded-md disabled:opacity-50 self-end">
-                        Post
-                    </button>
+                <div className="flex flex-col gap-2 mb-5">
+                    {replyingTo && (
+                        <div className="flex items-center justify-between bg-blue-500/10 border border-blue-500/20 rounded-md px-3 py-1.5 text-xs text-blue-500 font-medium">
+                            <span>Replying to @{replyingTo.author?.username}</span>
+                            <button
+                                type="button"
+                                className="text-gray-500 hover:text-red-500 cursor-pointer font-semibold"
+                                onClick={() => {
+                                    setReplyingTo(null);
+                                    if (text.startsWith(`@${replyingTo.author?.username}`)) {
+                                        setText("");
+                                    }
+                                }}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    )}
+                    <div className="flex gap-2">
+                        <textarea
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder={replyingTo ? `Reply to @${replyingTo.author?.username}...` : "Write a comment.."}
+                            className="form-textarea mt-0 flex-1"
+                            rows={2}
+                        />
+                        <button
+                            disabled={!text.trim() || buttonLoading}
+                            onClick={handlePost}
+                            className="w-20 md:w-25 h-9 md:h-10 cursor-pointer bg-blue-500 text-white text-sm font-medium rounded-md disabled:opacity-50 self-end"
+                        >
+                            Post
+                        </button>
+                    </div>
                 </div>
             )}
-            <div className="flex flex-col">
+            <div className="flex flex-col gap-2">
                 {comments.length === 0 && (
                     <p className="surface-text-muted py-3 text-center text-[0.9rem]">
                         No comments yet!
                     </p>
                 )}
 
-                {comments.map((c) => {
-                    const isCommentAuthor =
-                        String(c.author?._id) === String(userData?._id);
-                    const isPostAuthor =
-                        postAuthorId && String(postAuthorId) === String(userData?._id);
-                    const canDelete = isCommentAuthor || isPostAuthor;
-
-                    return (
-                        <div key={c._id} className="flex gap-3 py-3 px-2 rounded-lg border-b border-border/50 last:border-b-0">
-                            <Image alt={c.author?.name || "Comment author"} src={c.author?.avatar || "/default-avatar.png"} width={36} height={36} className="h-8 w-8 md:h-9 md:w-9 object-cover rounded-full shrink-0" />
-
-                            <div className="flex flex-col w-full">
-
-                                <div className="flex items-center gap-2">
-                                    <p
-                                        className="cursor-pointer text-[0.9rem] font-semibold text-foreground"
-                                        onClick={() =>
-                                            router.push(`/main/user/${c.author?.username}`)
-                                        }
-                                    >
-                                        {c.author?.name}
-                                    </p>
-
-                                    <div className="ml-auto relative">
-                                        <button
-                                            type="button"
-                                            className="surface-text-muted cursor-pointer"
-                                            onClick={() => {
-                                                setMenuOpenId((prev) => (prev === c._id ? null : c._id));
-                                            }}
-                                        >
-                                            <MoreHorizontal size={16} />
-                                        </button>
-
-                                        {menuOpenId === c._id && (
-                                            <div className="absolute right-0 top-6 z-20 w-36 overflow-hidden rounded-md border border-black/10 bg-white shadow-lg dark:border-white/10 dark:bg-blue-950">
-                                                {!isCommentAuthor && (
-                                                    <button
-                                                        type="button"
-                                                        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
-                                                        onClick={() => {
-                                                            setSelectedComment(c);
-                                                            setShowReportModal(true);
-                                                            setMenuOpenId(null);
-                                                        }}
-                                                    >
-                                                        <Flag size={14} />
-                                                        Report comment
-                                                    </button>
-                                                )}
-
-                                                {canDelete && (
-                                                    <button
-                                                        type="button"
-                                                        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-black/3 dark:hover:bg-white/5"
-                                                        onClick={() => {
-                                                            setSelectedComment(c);
-                                                            setShowDeleteModal(true);
-                                                            setMenuOpenId(null);
-                                                        }}
-                                                    >
-                                                        <Trash2 size={14} />
-                                                        Delete comment
-                                                    </button>
-                                                )}
-                                            </div>
-                                        )}
+                {comments.map((c) => (
+                    <div key={c._id} className="border-b border-border/50 last:border-b-0 pb-2">
+                        {renderCommentCard(c)}
+                        {c.replies && c.replies.length > 0 && (
+                            <div className="ml-10 pl-4 border-l border-border/50 flex flex-col gap-1 mt-1">
+                                {c.replies.map((reply) => (
+                                    <div key={reply._id}>
+                                        {renderCommentCard(reply, c)}
                                     </div>
-                                </div>
-
-                                <div className="surface-text-muted text-[0.9rem] whitespace-pre-wrap wrap-break-word">
-                                    <Linkify text={c?.content || ""} />
-                                </div>
-
-                                <p className="text-[0.75rem] text-gray-500 mt-1">
-                                    {timeAgo(c.createdAt)}
-                                </p>
-
+                                ))}
                             </div>
-                        </div>
-                    );
-                })}
+                        )}
+                    </div>
+                ))}
 
                 {hasMore && (
                     <div className="mt-3 text-center">
