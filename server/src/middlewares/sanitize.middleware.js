@@ -50,8 +50,11 @@ export const sanitizeText = (value, maxLength = 10000) => {
   // Second pass: Use DOMPurify for comprehensive sanitization
   cleaned = DOMPurify.sanitize(cleaned, purifyConfig);
 
-  // Third pass: Remove any remaining control characters
-  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, "");
+  // Third pass: Remove any remaining control characters (ASCII 0-31 and 127)
+  cleaned = cleaned.split("").filter((char) => {
+    const code = char.charCodeAt(0);
+    return code > 31 && code !== 127;
+  }).join("");
 
   // Trim and enforce max length
   return cleaned.trim().slice(0, maxLength);

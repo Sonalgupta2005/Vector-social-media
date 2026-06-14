@@ -672,9 +672,6 @@ export const getPostsByUser = asyncHandler(async (req, res) => {
         // - Include total count for all likes
         const postsWithLikes = await Promise.all(
             posts.map(async (post) => {
-                // Get total count of likes
-                const totalLikesCount = post.likes.length;
-
                 // Filter out blocked users from likes array
                 let likesAfterBlocking = post.likes;
                 if (excludeUserIds.length) {
