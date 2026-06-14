@@ -211,22 +211,19 @@ export const sendMessage = asyncHandler(async (req, res) => {
           conversation: conversationId,
           isRead: false,
         };
-        // findOneAndUpdate with new:false returns the pre-update doc,
-        // or null when a new doc was upserted. Only emit on first insert.
-        const existing = await Notification.findOneAndUpdate(
+        // Use updateOne to avoid a separate findOne query.
+        // upsertedId will only be populated if a new document was actually inserted.
+        const result = await Notification.updateOne(
           filter,
           { $setOnInsert: filter },
-          { upsert: true, returnDocument: "before" }
+          { upsert: true }
         );
         const io = getIO();
-        if (!existing) {
-          const notification = await Notification.findOne(filter);
-          if (notification) {
-            io.to(receiverId.toString()).emit("notification:new", {
-              notificationId: notification._id,
-              type: notification.type,
-            });
-          }
+        if (result.upsertedId) {
+          io.to(receiverId.toString()).emit("notification:new", {
+            notificationId: result.upsertedId,
+            type: filter.type,
+          });
         }
         
         io.to(receiverId.toString()).emit("receive_message", populated);
