@@ -518,7 +518,11 @@ Report post </button>
                         <Image
                             key={post.image}
                             src={post.image}
-                            alt="Post attachment"
+                            alt={
+                                post.content
+                                    ? `Post image by ${post.author?.username}: ${post.content.slice(0, 100)}`
+                                    : `Post image by ${post.author?.username}`
+                            }
                             width={1200}
                             height={800}
                             onLoad={() => {
