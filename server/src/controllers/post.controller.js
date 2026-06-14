@@ -223,7 +223,9 @@ export const createPost = async (req, res) => {
     } catch (error) {
         await cleanupTempUpload(req.file);
         if (imagePublicId) {
-            await cloudinary.uploader.destroy(imagePublicId).catch(() => {});
+            await cloudinary.uploader.destroy(imagePublicId).catch((error) => {
+                console.error("Cloudinary cleanup failed:", error);
+            });
         }
         return res.status(error.statusCode || 500).json({
             success: false,
@@ -403,7 +405,9 @@ export const updatePost = async (req, res) => {
             });
             newImagePublicId = uploadResult.public_id;
             if (post.imagePublicId) {
-                await cloudinary.uploader.destroy(post.imagePublicId).catch(() => {});
+                await cloudinary.uploader.destroy(post.imagePublicId).catch((error) => {
+                    console.error("Cloudinary cleanup failed:", error);
+                });
             }
             post.image = uploadResult.secure_url;
             post.imagePublicId = newImagePublicId;
@@ -429,7 +433,9 @@ export const updatePost = async (req, res) => {
     } catch (error) {
         await cleanupTempUpload(req.file);
         if (newImagePublicId) {
-            await cloudinary.uploader.destroy(newImagePublicId).catch(() => {});
+            await cloudinary.uploader.destroy(newImagePublicId).catch((error) => {
+                console.error("Cloudinary cleanup failed:", error);
+            });
         }
         res.status(error.statusCode || 500).json({
             success: false,

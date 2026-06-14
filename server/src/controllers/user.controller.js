@@ -47,7 +47,9 @@ export const uploadAvatar = async (req, res) => {
         });
         avatarPublicId = uploadResult.public_id;
         if (user.avatarPublicId) {
-            await cloudinary.uploader.destroy(user.avatarPublicId).catch(() => {});
+            await cloudinary.uploader.destroy(user.avatarPublicId).catch((error) => {
+                console.error("Cloudinary cleanup failed:", error);
+            });
         }
         user.avatar = uploadResult.secure_url;
         user.avatarPublicId = uploadResult.public_id;
@@ -59,7 +61,9 @@ export const uploadAvatar = async (req, res) => {
     } catch (error) {
         await cleanupTempUpload(req.file);
         if (avatarPublicId) {
-            await cloudinary.uploader.destroy(avatarPublicId).catch(() => {});
+            await cloudinary.uploader.destroy(avatarPublicId).catch((error) => {
+                console.error("Cloudinary cleanup failed:", error);
+            });
         }
         return res.status(error.statusCode || 500).json({
             success: false,
