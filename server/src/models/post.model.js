@@ -64,6 +64,7 @@ const postSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 postSchema.index({ content: "text", intent: "text" });
+postSchema.index({ author: 1, _id: -1 });
 
 postSchema.pre("save", function () {
   if (typeof this.content === "string") {
