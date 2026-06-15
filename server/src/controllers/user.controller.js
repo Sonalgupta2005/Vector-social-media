@@ -1048,6 +1048,13 @@ export const blockUser = async (req, res) => {
         // Post-commit sweep: clean up any notifications created between the
         // transaction's Notification.deleteMany and this point (race window
         // from concurrent likePost, sendMessage, or toggleFollow operations).
+        const sweptNotifications = await Notification.find({
+            $or: [
+                { recipient: currentUserId, sender: targetUserId },
+                { recipient: targetUserId, sender: currentUserId },
+            ],
+        }).lean();
+
         await Notification.deleteMany({
             $or: [
                 { recipient: currentUserId, sender: targetUserId },
@@ -1055,8 +1062,13 @@ export const blockUser = async (req, res) => {
             ],
         });
 
-        // Emit socket events only after the transaction has committed
+        // Emit notification:removed for swept notifications
         const io = getIO();
+        for (const notif of sweptNotifications) {
+            io.to(notif.recipient.toString()).emit("notification:removed", {
+                notificationId: notif._id,
+            });
+        }
         io.to(currentUserId).emit("user:blocked", { blockedUserId: targetUserId, blockerId: currentUserId });
         io.to(targetUserId).emit("user:blocked", { blockedUserId: currentUserId, blockerId: currentUserId });
         io.to(currentUserId).emit("bookmarks:invalidated", { userId: targetUserId });

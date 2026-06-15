@@ -368,6 +368,27 @@ export const deleteMessage = asyncHandler(async (req, res) => {
 
     const io = getIO();
 
+    // Find and remove the associated notification for the other participant
+    if (conversation) {
+      const otherParticipant = conversation.participants.find(
+        p => p.toString() !== req.user._id.toString()
+      );
+      if (otherParticipant) {
+        const deletedNotification = await Notification.findOneAndDelete({
+          type: "message",
+          conversation: message.conversation,
+          sender: req.user._id,
+          recipient: otherParticipant,
+        });
+
+        if (deletedNotification) {
+          io.to(otherParticipant.toString()).emit("notification:removed", {
+            notificationId: deletedNotification._id,
+          });
+        }
+      }
+    }
+
     if (conversation) {
       conversation.participants.forEach((participantId) => {
         io.to(participantId.toString()).emit("message_deleted", {
