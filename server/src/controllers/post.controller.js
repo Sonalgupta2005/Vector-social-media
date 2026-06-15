@@ -151,6 +151,16 @@ export const removePostById = async (postId) => {
     const session = await mongoose.startSession();
     try {
         await session.withTransaction(async () => {
+            const comments = await Comment.find({ post: postId }, "_id", { session });
+            const commentIds = comments.map(c => c._id);
+
+            if (commentIds.length > 0) {
+                await Report.deleteMany(
+                    { targetType: "comment", targetId: { $in: commentIds } },
+                    { session }
+                );
+            }
+
             await Comment.deleteMany({ post: postId }, { session });
             await Notification.deleteMany({ post: postId }, { session });
             await Report.deleteMany({ targetType: "post", targetId: postId }, { session });
