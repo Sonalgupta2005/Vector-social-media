@@ -2,6 +2,7 @@ import "dotenv/config";
 import connectDB from "./src/config/mongodb.js";
 import { initSocket } from "./src/socket/socket.js";
 import app from "./src/app.js";
+import { startCleanupJob } from "./src/jobs/cleanupConversations.js";
 
 await connectDB();
 
@@ -12,3 +13,4 @@ const server = app.listen(PORT, () => {
 });
 
 await initSocket(server);
+startCleanupJob();
