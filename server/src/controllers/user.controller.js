@@ -964,22 +964,22 @@ export const blockUser = async (req, res) => {
         if (opts.session) {
             [blockedOnCurrentCounts, blockerOnTargetCounts] = await Promise.all([
                 Comment.aggregate([
-                    { $match: { post: { $in: currentUserPostIds }, author: targetUser._id } },
+                    { $match: { post: { $in: currentUserPostIds }, author: targetUser._id, isFlaggedForReview: { $ne: true } } },
                     { $group: { _id: "$post", count: { $sum: 1 } } },
                 ]).session(opts.session),
                 Comment.aggregate([
-                    { $match: { post: { $in: targetUserPostIds }, author: currentUser._id } },
+                    { $match: { post: { $in: targetUserPostIds }, author: currentUser._id, isFlaggedForReview: { $ne: true } } },
                     { $group: { _id: "$post", count: { $sum: 1 } } },
                 ]).session(opts.session),
             ]);
         } else {
             [blockedOnCurrentCounts, blockerOnTargetCounts] = await Promise.all([
                 Comment.aggregate([
-                    { $match: { post: { $in: currentUserPostIds }, author: targetUser._id } },
+                    { $match: { post: { $in: currentUserPostIds }, author: targetUser._id, isFlaggedForReview: { $ne: true } } },
                     { $group: { _id: "$post", count: { $sum: 1 } } },
                 ]),
                 Comment.aggregate([
-                    { $match: { post: { $in: targetUserPostIds }, author: currentUser._id } },
+                    { $match: { post: { $in: targetUserPostIds }, author: currentUser._id, isFlaggedForReview: { $ne: true } } },
                     { $group: { _id: "$post", count: { $sum: 1 } } },
                 ]),
             ]);
