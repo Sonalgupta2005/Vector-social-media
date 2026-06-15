@@ -8,7 +8,22 @@
  * to provide defense-in-depth XSS protection.
  */
 
-import DOMPurify from "isomorphic-dompurify";
+import { createRequire } from "module";
+
+// isomorphic-dompurify eagerly spins up a JSDOM window the moment it is
+// imported. Loading it at module scope means every file that imports the app
+// (including unit test suites that never sanitize anything) pays that cost and,
+// under Jest, JSDOM's deferred internal requires can fire after the test
+// environment is torn down. We defer the require to first use instead, so JSDOM
+// only initializes inside a live request and never at import time.
+const require = createRequire(import.meta.url);
+let domPurify = null;
+const getDOMPurify = () => {
+  if (!domPurify) {
+    domPurify = require("isomorphic-dompurify");
+  }
+  return domPurify;
+};
 
 /**
  * Configure DOMPurify with strict settings
@@ -48,7 +63,7 @@ export const sanitizeText = (value, maxLength = 10000) => {
     .replace(/on\w+\s*=\s*[^\s>]*/gi, ""); // Remove event handlers without quotes
 
   // Second pass: Use DOMPurify for comprehensive sanitization
-  cleaned = DOMPurify.sanitize(cleaned, purifyConfig);
+  cleaned = getDOMPurify().sanitize(cleaned, purifyConfig);
 
   // Third pass: Remove any remaining control characters
   // eslint-disable-next-line no-control-regex
