@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Message from "../models/message.model.js";
 import Conversation from "../models/conversation.model.js";
 import Notification from "../models/notification.model.js";
@@ -44,29 +45,25 @@ export const getMessages = asyncHandler(async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), MAX_LIMIT);
     const before = req.query.before;
 
-    // Validate the before cursor before passing it to new Date().
-    // A truthy but non-date string such as "null", "undefined", or "1 OR 1=1"
-    // produces Invalid Date, which turns the $lt filter into a NaN comparison
-    // that silently returns zero results with HTTP 200.
-    let beforeDate;
+    let beforeId;
     if (before) {
-      beforeDate = new Date(before);
-      if (isNaN(beforeDate.getTime())) {
+      if (!mongoose.Types.ObjectId.isValid(before)) {
         return res.status(400).json({
-          message: "Invalid 'before' cursor: must be a valid ISO 8601 date string.",
+          message: "Invalid cursor.",
         });
       }
+      beforeId = new mongoose.Types.ObjectId(before);
     }
 
     const filter = {
       conversation: conversationId,
       isDeleted: false,
-      ...(beforeDate && { createdAt: { $lt: beforeDate } }),
+      ...(beforeId && { _id: { $lt: beforeId } }),
     };
 
     const messages = await Message.find(filter)
       .populate("sender", "username name avatar")
-      .sort({ createdAt: -1 })
+      .sort({ _id: -1 })
       .limit(limit);
 
     res.json({ messages: messages.reverse(), hasMore: messages.length === limit });
