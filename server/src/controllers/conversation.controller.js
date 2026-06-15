@@ -1,6 +1,5 @@
 import Conversation from "../models/conversation.model.js";
 import Message from "../models/message.model.js";
-import Notification from "../models/notification.model.js";
 import User from "../models/user.model.js";
 import { getIO } from "../socket/socket.js";
 import asyncHandler from "../utils/asyncHandler.js";
@@ -376,47 +375,23 @@ export const deleteConversation = asyncHandler(async (req, res) => {
         });
     }
 
-    const allDeleted = convo.participants.every((participantId) =>
-        convo.deletedBy.some(
-            (id) => id.toString() === participantId.toString()
-        )
+    const otherParticipants = convo.participants.filter(
+        (pid) => pid.toString() !== req.user._id.toString()
     );
 
-    if (allDeleted) {
-        await Message.deleteMany({ conversation: convo._id });
-        // Clean up associated message notifications
-        await Notification.deleteMany({
-            type: "message",
-            conversation: convo._id,
-        });
-        await Conversation.deleteOne({ _id: convo._id });
-
-        convo.participants.forEach((pid) => {
-            getIO().to(pid.toString()).emit("conversation:deleted", {
+    otherParticipants.forEach((pid) => {
+        getIO().to(pid.toString()).emit(
+            "conversation:participant_deleted",
+            {
                 conversationId: convo._id,
-            });
-            getIO().to(pid.toString()).emit("notifications:cleared", {
-                conversationId: convo._id,
-            });
-        });
-    } else {
-        const otherParticipants = convo.participants.filter(
-            (pid) => pid.toString() !== req.user._id.toString()
+                deletedBy: req.user._id,
+            }
         );
-
-        otherParticipants.forEach((pid) => {
-            getIO().to(pid.toString()).emit(
-                "conversation:participant_deleted",
-                {
-                    conversationId: convo._id,
-                    deletedBy: req.user._id,
-                }
-            );
-        });
-    }
+    });
 
     res.json({
-        message: "Conversation deleted successfully"
+        message: "Conversation deleted successfully",
+        softDeleted: true,
     });
 
 });
