@@ -159,6 +159,7 @@ export default function EditPostModal({
           {/* Content Area */}
           <div className="relative group">
             <textarea
+              maxLength={MAX_CHARS}
               placeholder="What's on your mind? Share your thoughts..."
               value={content}
               onChange={(e) => setContent(e.target.value)}
