@@ -31,6 +31,26 @@ const postSchema = new mongoose.Schema({
     required: true
   },
 
+  isEdited: {
+    type: Boolean,
+    default: false
+  },
+
+  editedAt: {
+    type: Date,
+    default: null
+  },
+
+  isDeleted: {
+    type: Boolean,
+    default: false
+  },
+
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+
   likes: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: "User"

@@ -90,7 +90,7 @@ const getTopPosts = (daysAgo, maxResults) => async (req, res) => {
       Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : maxResults,
       maxResults
     );
-    let filter = { createdAt: { $gte: since } };
+    let filter = { createdAt: { $gte: since }, isDeleted: { $ne: true } };
     let excludeUserIds = [];
 
     if (req.user) {
@@ -133,6 +133,7 @@ const getTopPosts = (daysAgo, maxResults) => async (req, res) => {
           _id: 1, content: 1, image: 1, intent: 1, likes: 1,
           commentsCount: 1, sharesCount: 1, likesCount: 1,
           createdAt: 1, updatedAt: 1,
+          isEdited: 1, editedAt: 1,
           "author._id": 1, "author.username": 1, "author.name": 1,
           "author.surname": 1, "author.avatar": 1,
         },
@@ -169,7 +170,9 @@ export const removePostById = async (postId) => {
             await Notification.deleteMany({ post: postId }, { session });
             await Report.deleteMany({ targetType: "post", targetId: postId }, { session });
             await User.updateMany({ bookmarks: postId }, { $pull: { bookmarks: postId } }, { session });
-            await post.deleteOne({ session });
+            post.isDeleted = true;
+            post.deletedAt = new Date();
+            await post.save({ session });
         });
     } finally {
         await session.endSession();
@@ -252,7 +255,7 @@ export const getPosts = asyncHandler(async (req, res) => {
         const cursor = req.query.cursor;
         const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), MAX_LIMIT);
 
-        let filter = {};
+        let filter = { isDeleted: { $ne: true } };
         if (req.user) {
             const { currentUserId, excludeUserIds } = await buildBlockExclusion(req.user);
             filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
@@ -293,7 +296,8 @@ export const searchPosts = asyncHandler(async (req, res) => {
             return res.status(200).json({ posts: [], limit, hasMore: false, nextCursor: null });
         }
 
-        let filter = { $text: { $search: q } };
+
+        let filter = { $text: { $search: q }, isDeleted: { $ne: true } };
         if (req.user) {
             const { currentUserId, excludeUserIds } = await buildBlockExclusion(req.user);
             filter = buildVisibilityFilter(currentUserId, excludeUserIds, filter);
@@ -433,6 +437,8 @@ export const updatePost = async (req, res) => {
 
         post.content = normalizedContent;
         post.intent = intent;
+        post.isEdited = true;
+        post.editedAt = new Date();
 
         await post.save();
         const populatedPost = await post.populate([
@@ -660,13 +666,13 @@ export const getPostsByUser = asyncHandler(async (req, res) => {
 
         let pinnedPosts = [];
         if (!cursor) {
-            pinnedPosts = await Post.find({ author: userId, isPinned: true, isFlaggedForReview: { $ne: true } })
+            pinnedPosts = await Post.find({ author: userId, isPinned: true, isFlaggedForReview: { $ne: true },isDeleted: { $ne: true } })
                 .populate("author", "username name avatar")
                 .populate(likesPopulate)
                 .sort({ _id: -1 });
         }
 
-        let postFilter = { author: userId, isPinned: { $ne: true }, isFlaggedForReview: { $ne: true } };
+        let postFilter = { author: userId, isPinned: { $ne: true }, isFlaggedForReview: { $ne: true },isDeleted: { $ne: true } };
         if (cursor) {
             if (mongoose.Types.ObjectId.isValid(cursor)) {
                 postFilter._id = { $lt: cursor };
@@ -754,7 +760,7 @@ export const getSinglePost = asyncHandler(async (req, res) => {
             excludeUserIds = [...blockedIds, ...blockerIds];
         }
 
-        const post = await Post.findById(postId)
+        const post = await Post.findOne({ _id: postId, isDeleted: { $ne: true } })
             .populate("author", "username name avatar isPrivate")
             .populate(
                 excludeUserIds.length
@@ -932,7 +938,8 @@ export const getBookmarks = asyncHandler(async (req, res) => {
           .json({ success: false, message: "Invalid cursor" });
       }
     }
-    const filter = { _id: { $in: bookmarkIds }, isFlaggedForReview: { $ne: true } };
+
+    const filter = { _id: { $in: bookmarkIds }, isFlaggedForReview: { $ne: true }, isDeleted: { $ne: true } };
     if (cursor) {
       filter._id = { $in: bookmarkIds, $lt: new mongoose.Types.ObjectId(cursor) };
     }
@@ -958,6 +965,7 @@ export const getBookmarks = asyncHandler(async (req, res) => {
     const posts = await Post.find(filter)
       .sort({ _id: -1 })
       .limit(limit + 1)
+
       .populate("author", "username name surname avatar")
       .populate("likes", "username name avatar _id")
       .lean();

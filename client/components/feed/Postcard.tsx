@@ -591,7 +591,17 @@ Report post </button>
                 </div>
 
                 <div>
-                    <p className="text-sm sm:text-md">{timeAgo(post.createdAt)}</p>
+                    <p className="text-sm sm:text-md text-foreground/70 flex items-center gap-1">
+                        {timeAgo(post.createdAt)}
+                        {post.isEdited && (
+                            <span 
+                                title={post.editedAt ? `Edited: ${new Date(post.editedAt).toLocaleString()}` : 'Edited'}
+                                className="text-xs text-foreground/50 hover:text-foreground/80 transition-colors cursor-help"
+                            >
+                                • edited
+                            </span>
+                        )}
+                    </p>
                 </div>
             </div>
 
