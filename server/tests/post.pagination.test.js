@@ -9,8 +9,8 @@ describe("Post Cursor-Based Pagination", () => {
   let testUser;
   let postIds = [];
 
-  beforeAll(async () => {
-    // Create a test user
+  beforeEach(async () => {
+    // Create fresh test user for each test
     testUser = await User.create({
       username: "paginationuser",
       email: "pagination@test.com",
@@ -20,6 +20,7 @@ describe("Post Cursor-Based Pagination", () => {
     testUserId = testUser._id;
 
     // Create 15 test posts for pagination testing
+    postIds = [];
     for (let i = 0; i < 15; i++) {
       const post = await Post.create({
         author: testUserId,
@@ -32,12 +33,6 @@ describe("Post Cursor-Based Pagination", () => {
 
     // Sort by creation order (newest first) to match query behavior
     postIds = postIds.reverse();
-  });
-
-  afterAll(async () => {
-    // Cleanup test data
-    await Post.deleteMany({ author: testUserId });
-    await User.deleteOne({ _id: testUserId });
   });
 
   describe("GET /api/posts/user/:userId", () => {
@@ -215,6 +210,7 @@ describe("Post Cursor-Based Pagination", () => {
           username: `liker${i}`,
           email: `liker${i}@test.com`,
           password: "password",
+          name: `Liker ${i}`,
         });
         post.likes.push(likeUser._id);
       }
