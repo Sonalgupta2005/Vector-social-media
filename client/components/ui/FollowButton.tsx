@@ -1,5 +1,6 @@
 import axios from "axios";
 import { useEffect, useState } from "react";
+import { toast } from "react-toastify";
 
 type FollowButtonProps = {
   userId: string;
@@ -45,9 +46,14 @@ export default function FollowButton({
         onFollowChange?.(next);
       }
     } catch (err: unknown) {
-      if (err instanceof Error) {
-        console.error(err.message);
+      let message = "Something went wrong. Please try again.";
+      if (axios.isAxiosError(err)) {
+        message = err.response?.data?.message || message;
+      } else if (err instanceof Error) {
+        message = err.message || message;
       }
+      console.error(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
